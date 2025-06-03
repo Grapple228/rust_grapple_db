@@ -1337,7 +1337,7 @@ impl Client {
     pub async fn migrate(session: &Session, use_keyspace: &Option<String>) -> Result<()> {
         debug!("Migration started");
 
-        let mut builder = MigrationBuilder::new().drop_and_replace(true);
+        let mut builder = MigrationBuilder::new();
 
         if let Some(keyspace) = use_keyspace {
             builder = builder.keyspace(keyspace.to_owned());

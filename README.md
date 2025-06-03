@@ -22,7 +22,7 @@ To include `grapple_db` in your project, add it to your dependencies. If you are
 ```toml
 # Example for Cargo.toml (Rust)
 [dependencies]
-grapple_db = { version = "0.1.0", features = ["scylla"] }
+grapple_db = { version = "0.1", features = ["scylla"] }
 charybdis = { version = "1.0.1", features = ["migrate"] }
 scylla = { version = "1.2.0" }
 ```

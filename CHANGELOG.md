@@ -1,5 +1,11 @@
 # Changelog for grapple_db
 
+## [0.1.2] - 03 June 2025
+
+### Fixes
+
+- Removed drop_and_replace in migrate
+
 ## [0.1.1] - 03 June 2025
 
 ### Fixes
