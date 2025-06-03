@@ -13,7 +13,7 @@ unsafe_code = "forbid"
 # unused = { level = "allow", priority = -1 } # For exploratory dev.
 
 [features]
-default = []
+default = ["scylla"]
 scylla = ["dep:scylla", "dep:charybdis"]
 
 [[bench]]

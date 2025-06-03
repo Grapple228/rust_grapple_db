@@ -16,7 +16,7 @@ use scylla::{
 };
 
 #[cfg(feature = "scylla")]
-use rust_grapple_db::scylla::Client;
+use grapple_db::scylla::Client;
 
 use chrono::Utc;
 use criterion::Throughput;
@@ -266,7 +266,7 @@ fn bench_orm_vs_native(c: &mut Criterion) {
         .bench_function("My Insert", |b| {
             b.iter(|| {
                 rt.block_on(async {
-                    client.create(test_user.insert()).await.unwrap();
+                    client.insert(&test_user).await.unwrap();
                 })
             });
         })
@@ -318,7 +318,7 @@ fn bench_orm_vs_native(c: &mut Criterion) {
                     .collect::<Vec<BenchUser>>();
 
                 rt.block_on(async {
-                    client.create_many(&orm_users, 1000).await.unwrap();
+                    client.insert_many(&orm_users, 1000).await.unwrap();
                 })
             });
         })
@@ -447,7 +447,7 @@ fn bench_orm_vs_native(c: &mut Criterion) {
     c.bench_function("My Update", |b| {
         b.iter(|| {
             rt.block_on(async {
-                client.update(updated_user.update()).await.unwrap();
+                client.update(&updated_user).await.unwrap();
             })
         });
     });
@@ -478,7 +478,7 @@ fn bench_orm_vs_native(c: &mut Criterion) {
     c.bench_function("My Delete", |b| {
         b.iter(|| {
             rt.block_on(async {
-                client.delete(test_user.delete()).await.unwrap();
+                client.delete(&test_user).await.unwrap();
             })
         });
     });

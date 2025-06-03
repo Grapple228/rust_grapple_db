@@ -3,7 +3,6 @@
 #[cfg(feature = "scylla")]
 use charybdis::{
     macros::charybdis_model,
-    operations::{Delete, Update},
     types::{Text, Uuid},
 };
 #[cfg(feature = "scylla")]
@@ -48,8 +47,6 @@ fn main() {
 async fn main() -> Result<()> {
     // -- INIT CLIENT
 
-    use std::time::Instant;
-
     let con_params = ConnectionParams {
         fetch_keyspaces: ["auth".into()].to_vec(),
         use_keyspace: Some("auth".into()),
@@ -66,50 +63,35 @@ async fn main() -> Result<()> {
     let custom = seed_users(&client).await?;
 
     // -- UPDATE USER
-    let mut custom_changed = custom.clone();
+    let mut custom_changed: User = custom.clone();
     custom_changed.name = Some("Other name".into());
 
-    let start = Instant::now();
-    client.update(custom_changed.update()).await?;
-    let end = start.elapsed();
-    println!("Update one: {:?}", end);
+    client.update(&custom_changed).await?;
 
     // Check
-    let start = Instant::now();
     let changed_check = client.get(User::find_by_id(custom.id)).await?;
-    let end = start.elapsed();
-    println!("Get one: {:?}", end);
     assert_eq!(changed_check.name, custom_changed.name);
 
     // -- DELETE USER
-    let start = Instant::now();
-    client.delete(changed_check.delete()).await?;
-    let end = start.elapsed();
-    println!("Delete one: {:?}", end);
-
+    client.delete(&changed_check).await?;
     assert_eq!(changed_check.name, custom_changed.name);
 
-    let start = Instant::now();
     let deleted_check = client.get(User::find_by_id(custom.id)).await;
-    let end = start.elapsed();
-    println!("Get one (same id): {:?}", end);
     assert!(deleted_check.is_err());
+
+    // -- GET COUNT
+    let _my_count = client.count(User::find_by_name("find me".into())).await?;
 
     // -- STREAM USERS
     let mut users_count = 0;
 
-    let start = Instant::now();
     let stream = client
         .stream(User::find_by_name("find me".to_string()))
         // .stream(User::find_all())
         .await?;
 
-    let end = start.elapsed();
-    println!("Get stream: {:?}", end);
-
     let mut pagable_stream = PagableCharybdisStream::new(stream, 5);
 
-    let start = Instant::now();
     while let Some(users) = pagable_stream.next_page().await {
         for user in users {
             println!("{} {:?} {:?}", user.id, user.name, user.pwd);
@@ -117,9 +99,6 @@ async fn main() -> Result<()> {
 
         users_count += &users.len();
     }
-
-    let end = start.elapsed();
-    println!("Iterate all stream and print: {:?}", end);
 
     println!("Users in stream: {}", users_count);
 
@@ -171,7 +150,7 @@ async fn seed_users(client: &Client) -> Result<User> {
 
     // -- Insers users
     let start = Instant::now();
-    client.create_many(&users, CHUNK_SIZE).await?;
+    client.insert_many(&users, CHUNK_SIZE).await?;
     let end = start.elapsed();
     println!(
         "Create many (batch) {} elements: {:?} with chunk_size: {}",
