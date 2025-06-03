@@ -158,7 +158,7 @@ Benchmark results available at [`/benches/scylla_bench.md`](/benches/scylla_benc
 
 ## Acknowledgments
 
-The **`scylla`** feature is built on top of the Carybdis ORM, which provides essential functionality for ScyllaDB interactions. For more details on its features and usage, you can find in repo: [`Git`](https://github.com/nodecosmos/charybdis)
+The **`scylla`** feature is built on top of the Charybdis ORM, which provides essential functionality for ScyllaDB interactions. For more details on its features and usage, you can find in repo: [`Git`](https://github.com/nodecosmos/charybdis)
 
 ## Contributing
 
