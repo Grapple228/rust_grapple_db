@@ -2,9 +2,9 @@
 name = "grapple_db"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
-description = ""
-authors = ["grapple228 <greenapple228882@yandex.ru>"]
+license = "MIT"
+description = "Library with clients for different databases with lightweight interface"
+authors = ["grapple228"]
 readme = "README.md"
 repository = "https://github.com/grapple228/rust_grapple_db.git"
 
@@ -19,7 +19,6 @@ scylla = ["dep:scylla", "dep:charybdis"]
 [[bench]]
 name = "scylla_bench"
 harness = false
-
 
 [dependencies]
 # Async
