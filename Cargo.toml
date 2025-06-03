@@ -1,6 +1,6 @@
 [package]
 name = "grapple_db"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 description = "Library with clients for different databases with lightweight interface"

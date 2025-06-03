@@ -1,5 +1,11 @@
 # Changelog for grapple_db
 
+## [0.1.1] - 03 June 2025
+
+### Fixes
+
+- Fixed mistakes in comments
+
 ## [0.1.0] - 03 June 2025
 
 ### Added

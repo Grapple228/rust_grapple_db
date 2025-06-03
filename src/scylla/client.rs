@@ -298,7 +298,7 @@ impl Client {
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///     
-    ///     // let user = client.get(User::find_by_id(user_id)).await?;
+    ///     let user = client.get(User::find_by_id(user_id)).await?;
     ///     Ok(())
     /// }
     /// ```
@@ -407,9 +407,9 @@ impl Client {
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///     
-    ///     // let mut user = get_user_somehow();
-    ///     // user.name = "New Name".to_string();
-    ///     // client.update(&user).await?;
+    ///     let mut user = get_user_somehow();
+    ///     user.name = "New Name".to_string();
+    ///     client.update(&user).await?;
     ///     
     ///     Ok(())
     /// }
@@ -473,8 +473,8 @@ impl Client {
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///     
-    ///     // let users = vec![/* ... users to update ... */];
-    ///     // client.update_many(&users, 1000).await?;
+    ///     let users = vec![/* ... users to update ... */];
+    ///     client.update_many(&users, 1000).await?;
     ///     
     ///     Ok(())
     /// }
@@ -518,8 +518,8 @@ impl Client {
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///     
-    ///     // let user = User::new("John Doe", "john@example.com");
-    ///     // client.insert(&user).await?;
+    ///     let user = User::new("John Doe", "john@example.com");
+    ///     client.insert(&user).await?;
     ///     
     ///     Ok(())
     /// }
@@ -583,8 +583,8 @@ impl Client {
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///     
-    ///     // let users = vec![/* ... users to insert ... */];
-    ///     // client.insert_many(&users, 1000).await?;
+    ///     let users = vec![/* ... users to insert ... */];
+    ///     client.insert_many(&users, 1000).await?;
     ///     
     ///     Ok(())
     /// }
@@ -628,8 +628,8 @@ impl Client {
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///     
-    ///     // let user = get_user_somehow();
-    ///     // client.delete(&user).await?;
+    ///     let user = get_user_somehow();
+    ///     client.delete(&user).await?;
     ///     
     ///     Ok(())
     /// }
@@ -693,8 +693,8 @@ impl Client {
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///     
-    ///     // let users = vec![/* ... users to delete ... */];
-    ///     // client.delete_many(&users, 1000).await?;
+    ///     let users = vec![/* ... users to delete ... */];
+    ///     client.delete_many(&users, 1000).await?;
     ///     
     ///     Ok(())
     /// }
@@ -739,13 +739,13 @@ impl Client {
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///     
-    ///     // let mut stream = client.stream(User::find_all()).await?;
-    ///     // while let Some(user) = stream.next().await {
-    ///     //     match user {
-    ///     //         Ok(user) => println!("User: {:?}", user),
-    ///     //         Err(e) => eprintln!("Error: {:?}", e),
-    ///     //     }
-    ///     // }
+    ///     let mut stream = client.stream(User::find_all()).await?;
+    ///     while let Some(user) = stream.next().await {
+    ///          match user {
+    ///              Ok(user) => println!("User: {:?}", user),
+    ///              Err(e) => eprintln!("Error: {:?}", e),
+    ///          }
+    ///      }
     ///     
     ///     Ok(())
     /// }
