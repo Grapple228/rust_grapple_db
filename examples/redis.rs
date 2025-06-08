@@ -1,7 +1,7 @@
 #[cfg(feature = "redis")]
 use grapple_db::redis::{AsyncCommands, Client, RedisModel};
 #[cfg(feature = "redis")]
-use redis_macros::FromRedisValue;
+use grapple_redis_macros::FromRedisValue;
 #[cfg(feature = "redis")]
 use serde::{Deserialize, Serialize};
 

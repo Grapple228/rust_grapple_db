@@ -28,7 +28,7 @@
 //! use grapple_db::redis::RedisModel;
 //! use grapple_db::redis::RedisModelCollector;
 //! use grapple_db::redis::FromRedisValue;
-//! use redis_macros::FromRedisValue;
+//! use grapple_redis_macros::FromRedisValue;
 //!
 //! #[derive(Debug, serde::Serialize, serde::Deserialize, FromRedisValue)]
 //! struct MyModel {
@@ -80,7 +80,7 @@ use crate::redis::RedisModel;
 /// use grapple_db::redis::RedisModel;
 /// use grapple_db::redis::RedisModelCollector;
 /// use grapple_db::redis::FromRedisValue;
-/// use redis_macros::FromRedisValue;
+/// use grapple_redis_macros::FromRedisValue;
 ///
 /// #[derive(Debug, serde::Serialize, serde::Deserialize, FromRedisValue)]
 /// struct MyModel {

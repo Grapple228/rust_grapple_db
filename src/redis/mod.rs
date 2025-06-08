@@ -53,7 +53,7 @@ use serde::{de::DeserializeOwned, Serialize};
 /// use grapple_db::redis::FromRedisValue;
 /// use grapple_db::redis::Result;
 /// use grapple_db::redis::RedisModel;
-/// use redis_macros::FromRedisValue;
+/// use grapple_redis_macros::FromRedisValue;
 ///
 /// #[derive(Debug, Deserialize, Serialize, FromRedisValue)]
 /// struct MyModel {
