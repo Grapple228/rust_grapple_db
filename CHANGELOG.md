@@ -1,5 +1,12 @@
 # Changelog for grapple_db
 
+## [0.2.1] - 08 June 2025
+
+### Fixes
+
+- `FromRedisValue` of `grapple_redis_macros` moved into `grapple_db/redis/macros` and available without external dependensies
+- Documentation Fix because of macro location changed.
+
 ## [0.2.0] - 08 June 2025
 
 This release contains some breaking changes. The `Charybdis` library has been integrated into `grapple_db`, allowing it to be used directly from there. As a result, the module structure has been changed.

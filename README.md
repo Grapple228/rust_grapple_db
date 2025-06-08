@@ -83,7 +83,7 @@ let client = Client::connect(&cfg).await?;
 
 ```rust
 // Imports
-use grapple_redis_macros::FromRedisValue;
+use grapple_db::redis::macros::FromRedisValue;
 use grapple_db::redis::RedisModel;
 
 // Define struct

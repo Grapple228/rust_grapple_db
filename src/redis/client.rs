@@ -190,7 +190,7 @@ impl Client {
     /// ```rust,no_run
     /// use grapple_db::redis::Client;
     /// # use grapple_db::redis::RedisModel;
-    /// # use grapple_redis_macros::FromRedisValue;
+    /// # use grapple_db::redis::macros::FromRedisValue;
     /// # use grapple_db::redis::FromRedisValue;
     /// # use serde::{Serialize, Deserialize};
     ///
@@ -246,7 +246,7 @@ impl Client {
     /// use grapple_db::redis::Client;
     /// # use grapple_db::redis::RedisModel;
     /// # use grapple_db::redis::FromRedisValue;
-    /// # use grapple_redis_macros::FromRedisValue;
+    /// # use grapple_db::redis::macros::FromRedisValue;
     /// # use serde::{Serialize, Deserialize};
     ///
     /// // Assuming you have a model defined with trait `RedisModel` implemented
@@ -303,7 +303,7 @@ impl Client {
     /// use grapple_db::redis::Client;
     /// # use grapple_db::redis::RedisModel;
     /// # use grapple_db::redis::FromRedisValue;
-    /// # use grapple_redis_macros::FromRedisValue;
+    /// # use grapple_db::redis::macros::FromRedisValue;
     /// # use serde::{Serialize, Deserialize};
     /// # use grapple_db::redis::Expiry;
     ///
@@ -360,7 +360,7 @@ impl Client {
     /// use grapple_db::redis::Client;
     /// # use grapple_db::redis::RedisModel;
     /// # use grapple_db::redis::FromRedisValue;
-    /// # use grapple_redis_macros::FromRedisValue;
+    /// # use grapple_db::redis::macros::FromRedisValue;
     /// # use serde::{Serialize, Deserialize};
     ///
     /// // Assuming you have a model defined with trait `RedisModel` implemented
@@ -415,7 +415,7 @@ impl Client {
     /// use grapple_db::redis::Client;
     /// # use grapple_db::redis::RedisModel;
     /// # use grapple_db::redis::FromRedisValue;
-    /// # use grapple_redis_macros::FromRedisValue;
+    /// # use grapple_db::redis::macros::FromRedisValue;
     /// # use serde::{Serialize, Deserialize};
     ///
     /// // Assuming you have a model defined with trait `RedisModel` implemented
@@ -472,7 +472,7 @@ impl Client {
     /// use grapple_db::redis::Client;
     /// # use grapple_db::redis::RedisModel;
     /// # use grapple_db::redis::FromRedisValue;
-    /// # use grapple_redis_macros::FromRedisValue;
+    /// # use grapple_db::redis::macros::FromRedisValue;
     /// # use serde::{Serialize, Deserialize};
     ///
     /// // Assuming you have a model defined with trait `RedisModel` implemented
@@ -526,7 +526,7 @@ impl Client {
     /// use grapple_db::redis::Client;
     /// # use grapple_db::redis::RedisModel;
     /// # use grapple_db::redis::FromRedisValue;
-    /// # use grapple_redis_macros::FromRedisValue;
+    /// # use grapple_db::redis::macros::FromRedisValue;
     /// # use serde::{Serialize, Deserialize};
     ///
     /// // Assuming you have a model defined with trait `RedisModel` implemented
@@ -581,7 +581,7 @@ impl Client {
     /// use grapple_db::redis::Client;
     /// # use grapple_db::redis::RedisModel;
     /// # use grapple_db::redis::FromRedisValue;
-    /// # use grapple_redis_macros::FromRedisValue;
+    /// # use grapple_db::redis::macros::FromRedisValue;
     /// # use serde::{Serialize, Deserialize};
     ///
     /// // Assuming you have a model defined with trait `RedisModel` implemented
@@ -636,7 +636,7 @@ impl Client {
     /// use grapple_db::redis::Client;
     /// # use grapple_db::redis::RedisModel;
     /// # use grapple_db::redis::FromRedisValue;
-    /// # use grapple_redis_macros::FromRedisValue;
+    /// # use grapple_db::redis::macros::FromRedisValue;
     /// # use serde::{Serialize, Deserialize};
     ///
     /// // Assuming you have a model defined with trait `RedisModel` implemented
@@ -692,7 +692,7 @@ impl Client {
     /// use grapple_db::redis::Client;
     /// # use grapple_db::redis::RedisModel;
     /// # use grapple_db::redis::FromRedisValue;
-    /// # use grapple_redis_macros::FromRedisValue;
+    /// # use grapple_db::redis::macros::FromRedisValue;
     /// # use serde::{Serialize, Deserialize};
     ///
     /// // Assuming you have a model defined with trait `RedisModel` implemented
@@ -934,8 +934,8 @@ mod tests {
 
     use std::time::Duration;
 
+    use crate::redis::macros::FromRedisValue;
     use crate::redis::RedisModel;
-    use grapple_redis_macros::FromRedisValue;
     use serde::{Deserialize, Serialize};
 
     use super::*;

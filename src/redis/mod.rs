@@ -26,6 +26,10 @@ pub mod pool {
     pub use deadpool_redis::*;
 }
 
+pub mod macros {
+    pub use grapple_redis_macros::*;
+}
+
 pub use client::Client;
 pub use collector::RedisModelCollector;
 pub use deadpool_redis::redis::FromRedisValue;
@@ -53,7 +57,7 @@ use serde::{de::DeserializeOwned, Serialize};
 /// use grapple_db::redis::FromRedisValue;
 /// use grapple_db::redis::Result;
 /// use grapple_db::redis::RedisModel;
-/// use grapple_redis_macros::FromRedisValue;
+/// use grapple_db::redis::macros::FromRedisValue;
 ///
 /// #[derive(Debug, Deserialize, Serialize, FromRedisValue)]
 /// struct MyModel {
