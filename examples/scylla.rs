@@ -1,13 +1,13 @@
 // region:    --- Modules
 
 #[cfg(feature = "scylla")]
-use charybdis::{
+use grapple_db::scylla::charybdis::{
     macros::charybdis_model,
     types::{Text, Uuid},
 };
 #[cfg(feature = "scylla")]
 use grapple_db::{
-    scylla::{Client, ConnectionParams, CrudParams, PagableCharybdisStream},
+    scylla::{stream::PagableCharybdisStream, Client, ConnectionParams, CrudParams},
     Pagable,
 };
 
@@ -109,7 +109,7 @@ async fn main() -> Result<()> {
 async fn seed_users(client: &Client) -> Result<User> {
     use std::time::Instant;
 
-    const ITEMS_COUNT: usize = 10__000;
+    const ITEMS_COUNT: usize = 10_000;
     const CHUNK_SIZE: usize = 3000;
     const FIND_COUNT: usize = 100;
 

@@ -28,12 +28,35 @@ mod client;
 mod connection;
 mod crud;
 mod error;
-mod stream;
+pub mod stream;
+
+/// Module with charybdis functionality
+pub mod charybdis {
+    pub use charybdis::*;
+}
+pub mod query {
+    pub use charybdis::query::*;
+}
+pub mod operations {
+    pub use charybdis::batch::*;
+    pub use charybdis::operations::*;
+}
+pub mod types {
+    pub use charybdis::types::*;
+}
+pub mod model {
+    pub use charybdis::model::*;
+}
+pub mod migrate {
+    pub use charybdis::migrate::*;
+}
+pub mod macros {
+    pub use charybdis::macros::*;
+}
 
 pub use client::Client;
 pub use connection::ConnectionParams;
 pub use crud::CrudParams;
 pub use error::{Error, Result};
-pub use stream::PagableCharybdisStream;
 
 // endregion: --- Modules

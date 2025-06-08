@@ -2,7 +2,37 @@
 
 `grapple_db` is a library designed to simplify interactions with various databases. It offers a flexible architecture that allows you to select the database client you need and utilize it according to your requirements. The library can be easily integrated into your project using feature flags.
 
-## Descreption
+## Table of Contents
+
+- [grapple_db](#grapple_db)
+- [Description](#description)
+- [Features](#features)
+- [Installation](#installation)
+- [Redis Examples](#redis-examples)
+  - [Create Client](#create-client)
+  - [Define Model](#define-model)
+  - [Get](#get)
+  - [Set](#set)
+  - [Del](#del)
+  - [Other](#other)
+  - [Not Covered Methods](#not-covered-methods)
+- [Scylla Examples](#scylla-examples)
+  - [Create Client](#create-client-1)
+  - [Define Model](#define-model-1)
+  - [Get](#get-1)
+  - [Insert](#insert)
+  - [Update](#update)
+  - [Delete](#delete)
+  - [Count](#count)
+  - [Stream](#stream)
+  - [Batch (Insert, Update, Delete)](#batch-insert-update-delete---multiple-queries-at-once)
+  - [Benchmarking](#benchmarking)
+- [Plans for Future](#plans-for-future)
+- [Acknowledgments](#acknowledgments)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Description
 
 - **Support for Multiple Database Clients**: Effortlessly switch between different database clients by specifying the desired features during the build process.
 - **Configurable Connection Settings**: Easily define and manage connection parameters for each database client.
@@ -14,17 +44,100 @@
 ## Features
 
 - **scylla**: enable ScyllaDb (Cassandra) client
+- **redis**: enable Redis/Valkey client
+
+Defaults: []
 
 ## Installation
 
-To include `grapple_db` in your project, add it to your dependencies. If you are using a package manager, you can specify the features you need. For example:
+To include `grapple_db` in your project, add it to your dependencies. For example:
 
 ```toml
 # Example for Cargo.toml (Rust)
 [dependencies]
-grapple_db = { version = "0.1", features = ["scylla"] }
-charybdis = { version = "1.0.1", features = ["migrate"] }
-scylla = { version = "1.2.0" }
+grapple_db = { version = "0.2", features = ["scylla", "redis"] }
+scylla = { version = "1.2.0" } // For `scylla` feature
+```
+
+## Redis examples
+
+Full code example can be found in [`/examples/redis.rs`](/examples/redis.rs)
+
+### Create Client
+
+```rust
+// Default
+let client = Client::default().await?;
+
+// From url
+let client = Client::from_url("redis://127.0.0.1:6379").await?;
+
+// From config
+use grapple_db::redis::pool::Config;
+let cfg = Config::from_url("redis://127.0.0.1:6379");
+
+let client = Client::connect(&cfg).await?;
+```
+
+### Define Model
+
+```rust
+// Imports
+use redis_macros::FromRedisValue;
+use grapple_db::redis::RedisModel;
+
+// Define struct
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize, FromRedisValue)]
+pub struct Model {
+    a: i32,
+    b: i32,
+}
+
+// Implement trait
+impl RedisModel for Model {
+    fn key(&self) -> String {
+        // Key for model
+        format!("{}.{}", self.a, self.b)
+    }
+}
+```
+
+### Get
+
+```rust
+let key = model.key();
+let value: Option<Model> = client.get(&key).await?;
+```
+
+### Set
+
+```rust
+let model = Model::default();
+client.set(&model).await?;
+```
+
+### Del
+
+```rust
+let key = model.key();
+client.del(&key).await?;
+```
+
+### Other
+
+```rust
+let key = model.key();
+let val = client.exists(&key).await?;
+
+let val = client.rename(&key).await?;
+```
+
+### Not covered methods
+
+```rust
+// For not coveded methods use connection and operate over it
+client.connection().await?
+    .client_setname::<_, String>("my_client_name".to_string()).await?;
 ```
 
 ## Scylla Examples
@@ -55,7 +168,7 @@ Any of the models could be used with the same client
     global_secondary_indexes = [name],
     local_secondary_indexes = [],
 )]
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Default)]
 pub struct User {
     id: Uuid,
     name: Option<Text>,
@@ -135,7 +248,7 @@ client.update_many(&entities, chunk_size).await?;
 client.delete_many(&entities, chunk_size).await?;
 ```
 
-## Benchmarking
+### Benchmarking
 
 I utilized the original benchmarks from the Carybdis ORM, which compared the Scylla Driver with its own performance, and incorporated code from my library. The time difference is minimal and using my library is easier for my use case.
 
@@ -151,8 +264,6 @@ Benchmark results available at [`/benches/scylla_bench.md`](/benches/scylla_benc
 
 ## Plans for future
 
-- Add tests for modules
-- Implement client for Redis/Valkey DB
 - Implement client for Postgres DB
 - Implement client for Mongo DB
 

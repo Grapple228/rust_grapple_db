@@ -5,7 +5,7 @@
 //! cached sessions with customizable connection parameters.
 
 use super::Result;
-use scylla::{
+use charybdis::scylla::{
     client::{
         caching_session::{CachingSession, CachingSessionBuilder},
         session::Session,
@@ -245,5 +245,16 @@ impl ConnectionParams {
             .build();
 
         Ok(caching)
+    }
+}
+
+/// Converts a reference to `ConnectionParams` into an owned `ConnectionParams`.
+///
+/// This implementation allows for easy conversion from a reference to an
+/// owned instance, enabling flexibility in how parameters are passed
+/// around in the code.
+impl From<&ConnectionParams> for ConnectionParams {
+    fn from(value: &ConnectionParams) -> Self {
+        value.clone()
     }
 }

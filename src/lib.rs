@@ -7,7 +7,8 @@
 use async_trait::async_trait;
 
 // -- Modules
-
+#[cfg(feature = "redis")]
+pub mod redis;
 #[cfg(feature = "scylla")]
 pub mod scylla;
 

@@ -15,8 +15,21 @@
 //!
 //! ```rust,no_run
 //! use std::time::Duration;
-//! use charybdis::{batch::CharybdisModelBatch, query::CharybdisQuery};
 //! use scylla::statement::Consistency;
+//! use grapple_db::scylla::CrudParams;
+//! use grapple_db::scylla::operations::Find;
+//! use grapple_db::scylla::operations::ModelBatch;
+//!
+//! // Assuming you have a `User` model defined with `Charybdis`
+//! # #[grapple_db::scylla::macros::charybdis_model(
+//! #       table_name = users,
+//! #       partition_keys = [id],
+//! #       clustering_keys = [],
+//! #   )]
+//! # #[derive(Debug, Default)]
+//! # struct User {
+//! #     id: String,
+//! # }
 //!
 //! // Creating CRUD parameters with specific settings
 //! let params = CrudParams {
@@ -26,20 +39,18 @@
 //! };
 //!
 //! // Applying parameters to a batch operation
-//! let batch = CharybdisModelBatch::new(...); // Assume this initializes a batch
+//! let batch = User::batch(); // Assume this initializes a batch
 //! let configured_batch = params.apply_batch(batch);
 //!
 //! // Applying parameters to a query
-//! let query = CharybdisQuery::new(...); // Assume this initializes a query
+//! let query = User::find_all(); // Assume this initializes a query
 //! let configured_query = params.apply_query(query);
 //! ```
 
-use charybdis::{
-    batch::{CharybdisModelBatch, ModelBatch},
-    model::Model,
-    query::{CharybdisQuery, QueryExecutor},
-};
-use scylla::{serialize::row::SerializeRow, statement::Consistency};
+use super::model::Model;
+use super::operations::{CharybdisModelBatch, ModelBatch};
+use super::query::{CharybdisQuery, QueryExecutor};
+use charybdis::scylla::{serialize::row::SerializeRow, statement::Consistency};
 use std::time::Duration;
 
 /// Parameters for CRUD operations in Charybdis.
@@ -54,8 +65,21 @@ use std::time::Duration;
 ///
 /// ```rust,no_run
 /// use std::time::Duration;
-/// use charybdis::{batch::CharybdisModelBatch, query::CharybdisQuery};
 /// use scylla::statement::Consistency;
+/// use grapple_db::scylla::CrudParams;
+/// use grapple_db::scylla::operations::Find;
+/// use grapple_db::scylla::operations::ModelBatch;
+///
+/// // Assuming you have a `User` model defined with `Charybdis`
+/// # #[grapple_db::scylla::macros::charybdis_model(
+/// #       table_name = users,
+/// #       partition_keys = [id],
+/// #       clustering_keys = [],
+/// #   )]
+/// # #[derive(Debug, Default)]
+/// # struct User {
+/// #     id: String,
+/// # }
 ///
 /// // Creating CRUD parameters with specific settings
 /// let params = CrudParams {
@@ -65,11 +89,11 @@ use std::time::Duration;
 /// };
 ///
 /// // Applying parameters to a batch operation
-/// let batch = CharybdisModelBatch::new(...); // Assume this initializes a batch
+/// let batch = User::batch(); // Assume this initializes a batch
 /// let configured_batch = params.apply_batch(batch);
 ///
 /// // Applying parameters to a query
-/// let query = CharybdisQuery::new(...); // Assume this initializes a query
+/// let query = User::find_all(); // Assume this initializes a query
 /// let configured_query = params.apply_query(query);
 /// ```
 #[derive(Debug, Clone, Default)]

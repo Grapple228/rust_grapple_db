@@ -14,11 +14,29 @@
 //! # Examples
 //!
 //! ```rust,no_run
-//! use charybdis::{model::Model, stream::CharybdisModelStream};
-//! use crate::PagableCharybdisStream;
+//! use grapple_db::scylla::{model::Model, stream::CharybdisModelStream};
+//! use grapple_db::scylla::stream::PagableCharybdisStream;
+//! use grapple_db::Pagable;
+//! use grapple_db::scylla::Client;
+//! use grapple_db::scylla::operations::Find;
+//!
+//! // Assuming you have a `User` model defined with `Charybdis`
+//! # #[grapple_db::scylla::macros::charybdis_model(
+//! #       table_name = users,
+//! #       partition_keys = [id],
+//! #       clustering_keys = [],
+//! #   )]
+//! # #[derive(Debug, Default)]
+//! # struct User {
+//! #     id: String,
+//! # }
+//!
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = Client::default().await?;
 //!
 //! // Initialize a Charybdis model stream
-//! let stream = CharybdisModelStream::new(...); // Assume this initializes a stream
+//! let stream = client.stream(User::find_all()).await?;
 //!
 //! // Create a paginated stream with 10 items per page
 //! let mut paginated_stream = PagableCharybdisStream::new(stream, 10);
@@ -29,11 +47,17 @@
 //!         // Process each item
 //!     }
 //! }
+//!
+//! Ok(())
+//! # }
 //! ```
 
+use super::model::Model;
 use async_trait::async_trait;
-use charybdis::{model::Model, stream::CharybdisModelStream};
 use futures::StreamExt;
+
+#[allow(unused)]
+pub use charybdis::stream::*;
 
 use crate::Pagable;
 
@@ -53,11 +77,32 @@ use crate::Pagable;
 /// # Examples
 ///
 /// ```rust,no_run
-/// use charybdis::{model::Model, stream::CharybdisModelStream};
-/// use crate::PagableCharybdisStream;
+/// use grapple_db::scylla::{model::Model, stream::CharybdisModelStream};
+/// use grapple_db::scylla::stream::PagableCharybdisStream;
+/// use grapple_db::Pagable;
+/// # use grapple_db::scylla::Client;
+/// # use grapple_db::scylla::macros::charybdis_model;
+/// # use grapple_db::scylla::operations::Find;
+///
+/// // Assuming you have a User model defined
+/// # #[charybdis_model(
+/// #     table_name = users,
+/// #     partition_keys = [id],
+/// #     clustering_keys = [],
+/// # )]
+/// # #[derive(Debug, Default)]
+/// # struct User {
+/// #     id: String
+/// # }
+///
+/// # #[tokio::main]
+/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///
+/// let client = Client::default().await?;
 ///
 /// // Creating a new paginated stream with a specified number of items per page
-/// let stream = CharybdisModelStream::new(...); // Assume this initializes a stream
+/// // Initialize stream from client
+/// let stream = client.stream(User::find_all()).await?;
 /// let mut paginated_stream = PagableCharybdisStream::new(stream, 10);
 ///
 /// // Fetching the next page of items
@@ -66,6 +111,10 @@ use crate::Pagable;
 ///         // Process each item
 ///     }
 /// }
+///
+/// # Ok(())
+///
+/// # }
 /// ```
 pub struct PagableCharybdisStream<E>
 where

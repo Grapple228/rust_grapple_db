@@ -6,21 +6,21 @@
 
 use std::{fmt::Debug, path::Path, sync::Arc};
 
-use charybdis::{
-    batch::{CharybdisModelBatch, ModelBatch},
-    migrate::MigrationBuilder,
-    model::Model,
-    operations::{Delete, Insert, Update},
-    query::{CharybdisQuery, ModelMutation, ModelRow, ModelStream, QueryExecutor},
-    stream::CharybdisModelStream,
-};
+use super::migrate::MigrationBuilder;
+use super::model::Model;
+use super::operations::{CharybdisModelBatch, Delete, Insert, ModelBatch, Update};
+use super::query::{CharybdisQuery, ModelMutation, ModelRow, ModelStream, QueryExecutor};
+use super::stream::CharybdisModelStream;
+
+use caching_session::CachingSession;
+use charybdis::scylla::response::query_result::QueryResult;
+use charybdis::scylla::serialize::row::SerializeRow;
 use futures::StreamExt;
-use scylla::{
-    client::{caching_session::CachingSession, session::Session},
-    response::query_result::QueryResult,
-    serialize::row::SerializeRow,
-};
+use session::Session;
 use tracing::debug;
+
+#[allow(unused)]
+pub use charybdis::scylla::client::*;
 
 use crate::scylla::{ConnectionParams, CrudParams};
 
@@ -42,7 +42,8 @@ use super::Result;
 ///     let params = ConnectionParams::default();
 ///     let client = Client::connect(&params).await?;
 ///     
-///     // Use the client for database operations
+///     // Do socmething with client
+///
 ///     Ok(())
 /// }
 /// ```
@@ -75,12 +76,15 @@ impl Client {
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
+    ///
+    ///     // Do something with client
+    ///
     ///     Ok(())
     /// }
     /// ```
     pub async fn default() -> Result<Self> {
         let con_params = ConnectionParams::default();
-        Ok(Self::connect(&con_params).await?)
+        Self::connect(&con_params).await
     }
 
     /// Creates a new client from an existing cached session
@@ -105,10 +109,10 @@ impl Client {
     /// use grapple_db::scylla::Client;
     ///
     /// fn create_client_from_session(session: Arc<CachingSession>) -> Result<Client, Box<dyn std::error::Error>> {
-    ///     Ok(Client::from_session(session)?)
+    ///     Ok(Client::from_session(&session)?)
     /// }
     /// ```
-    pub fn from_session(session: Arc<CachingSession>) -> Result<Self> {
+    pub fn from_session(session: &Arc<CachingSession>) -> Result<Self> {
         Ok(Self {
             session: session.clone(),
             crud_params: None,
@@ -152,6 +156,9 @@ impl Client {
     ///     };
     ///     
     ///     let client = Client::connect(&params).await?;
+    ///     
+    ///     // Do socmething with client
+    ///
     ///     Ok(())
     /// }
     /// ```
@@ -167,12 +174,12 @@ impl Client {
         // Handle keyspace setup if specified
         if let Some(keyspace) = &con_params.use_keyspace {
             if con_params.recreate_keyspace {
-                client.recreate_keyspace(&keyspace).await?;
+                client.recreate_keyspace(keyspace).await?;
             } else {
-                client.create_keyspace(&keyspace).await?;
+                client.create_keyspace(keyspace).await?;
             }
 
-            client.use_keyspace(&keyspace).await?;
+            client.use_keyspace(keyspace).await?;
         }
 
         // Execute initialization files
@@ -182,7 +189,7 @@ impl Client {
 
         // Run migrations if enabled
         if con_params.migrate {
-            Self::migrate(&client.session.get_session(), &con_params.use_keyspace).await?;
+            Self::migrate(client.session.get_session(), &con_params.use_keyspace).await?;
         }
 
         Ok(client)
@@ -223,6 +230,8 @@ impl Client {
     ///             timeout: Some(Duration::from_secs(30)),
     ///             timestamp: None,
     ///         });
+    ///
+    ///     // Do something with client
     ///     
     ///     Ok(())
     /// }
@@ -257,6 +266,7 @@ impl Client {
     ///     let session = client.session();
     ///     
     ///     // Use session for advanced operations
+    ///
     ///     Ok(())
     /// }
     /// ```
@@ -292,13 +302,27 @@ impl Client {
     ///
     /// ```rust,no_run
     /// use grapple_db::scylla::Client;
-    /// // Assuming you have a User model defined with Charybdis
+    /// use grapple_db::scylla::types::Uuid;
+    ///
+    /// // Assuming you have a `User` model defined with `Charybdis`
+    /// # #[grapple_db::scylla::macros::charybdis_model(
+    /// #       table_name = users,
+    /// #       partition_keys = [id],
+    /// #       clustering_keys = [],
+    /// #   )]
+    /// # #[derive(Debug, Default)]
+    /// # struct User {
+    /// #     id: Uuid,
+    /// # }
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///     
+    ///     // Get id somehow
+    ///     let user_id = Uuid::from_u128(5);
     ///     let user = client.get(User::find_by_id(user_id)).await?;
+    ///
     ///     Ok(())
     /// }
     /// ```
@@ -351,19 +375,27 @@ impl Client {
     ///
     /// ```rust,no_run
     /// use grapple_db::scylla::Client;
-    /// // Assuming you have a User model defined with Charybdis
+    ///
+    /// // Assuming you have a `User` model defined with `Charybdis`
+    /// # #[grapple_db::scylla::macros::charybdis_model(
+    /// #       table_name = users,
+    /// #       partition_keys = [id],
+    /// #       clustering_keys = [],
+    /// #       global_secondary_indexes = [status],
+    /// #   )]
+    /// # #[derive(Debug, Default)]
+    /// # struct User {
+    /// #     id: String,
+    /// #     status: String,
+    /// # }
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///     
     ///     // Count all active users
-    ///     let count = client.count(User::find_by_status("active")).await?;
+    ///     let count = client.count(User::find_by_status("active".to_string())).await?;
     ///     println!("Total active users: {}", count);
-    ///     
-    ///     // Count users in a specific region
-    ///     let regional_count = client.count(User::find_by_region("US")).await?;
-    ///     println!("Users in US: {}", regional_count);
     ///     
     ///     Ok(())
     /// }
@@ -401,13 +433,25 @@ impl Client {
     ///
     /// ```rust,no_run
     /// use grapple_db::scylla::Client;
-    /// // Assuming you have a User model defined with Charybdis
+    ///
+    /// // Assuming you have a `User` model defined with `Charybdis`
+    /// # #[grapple_db::scylla::macros::charybdis_model(
+    /// #       table_name = users,
+    /// #       partition_keys = [id],
+    /// #       clustering_keys = [],
+    /// #   )]
+    /// # #[derive(Debug, Default)]
+    /// # struct User {
+    /// #     id: String,
+    /// #     name: String,
+    /// # }
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///     
-    ///     let mut user = get_user_somehow();
+    ///     /// Get user somehow
+    ///     let mut user = User::default();
     ///     user.name = "New Name".to_string();
     ///     client.update(&user).await?;
     ///     
@@ -469,11 +513,23 @@ impl Client {
     /// ```rust,no_run
     /// use grapple_db::scylla::Client;
     ///
+    /// // Assuming you have a `User` model defined with `Charybdis`
+    /// # #[grapple_db::scylla::macros::charybdis_model(
+    /// #       table_name = users,
+    /// #       partition_keys = [id],
+    /// #       clustering_keys = [],
+    /// #   )]
+    /// # #[derive(Debug, Default)]
+    /// # struct User {
+    /// #     id: String,
+    /// # }
+    ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///     
-    ///     let users = vec![/* ... users to update ... */];
+    ///     let users: Vec<User> = vec![/* ... users to update ... */];
+    ///
     ///     client.update_many(&users, 1000).await?;
     ///     
     ///     Ok(())
@@ -512,13 +568,30 @@ impl Client {
     ///
     /// ```rust,no_run
     /// use grapple_db::scylla::Client;
-    /// // Assuming you have a User model defined with Charybdis
+    /// use grapple_db::scylla::operations::New;
+    ///
+    /// // Assuming you have a `User` model defined with `Charybdis`
+    /// # #[grapple_db::scylla::macros::charybdis_model(
+    /// #       table_name = users,
+    /// #       partition_keys = [name],
+    /// #       clustering_keys = [],
+    /// #   )]
+    /// # #[derive(Debug, Default)]
+    /// # struct User {
+    /// #     name: String,
+    /// # }
+    /// #
+    /// # impl User{
+    /// #    pub fn new(name: &str) -> Self {
+    /// #        Self { name: name.to_string() }
+    /// #    }
+    /// # }
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///     
-    ///     let user = User::new("John Doe", "john@example.com");
+    ///     let user = User::new("John Doe");
     ///     client.insert(&user).await?;
     ///     
     ///     Ok(())
@@ -579,11 +652,22 @@ impl Client {
     /// ```rust,no_run
     /// use grapple_db::scylla::Client;
     ///
+    /// // Assuming you have a `User` model defined with `Charybdis`
+    /// # #[grapple_db::scylla::macros::charybdis_model(
+    /// #       table_name = users,
+    /// #       partition_keys = [id],
+    /// #       clustering_keys = [],
+    /// #   )]
+    /// # #[derive(Debug, Default)]
+    /// # struct User {
+    /// #     id: String,
+    /// # }
+    ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///     
-    ///     let users = vec![/* ... users to insert ... */];
+    ///     let users: Vec<User> = vec![/* ... users to insert ... */];
     ///     client.insert_many(&users, 1000).await?;
     ///     
     ///     Ok(())
@@ -622,13 +706,24 @@ impl Client {
     ///
     /// ```rust,no_run
     /// use grapple_db::scylla::Client;
-    /// // Assuming you have a User model defined with Charybdis
+    ///
+    /// // Assuming you have a User model defined
+    /// # #[grapple_db::scylla::macros::charybdis_model(
+    /// #       table_name = users,
+    /// #       partition_keys = [id],
+    /// #       clustering_keys = [],
+    /// #   )]
+    /// # #[derive(Debug, Default)]
+    /// # struct User {
+    /// #     id: String,
+    /// # }
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///     
-    ///     let user = get_user_somehow();
+    ///     /// Get user somehow
+    ///     let user = User::default();
     ///     client.delete(&user).await?;
     ///     
     ///     Ok(())
@@ -689,11 +784,22 @@ impl Client {
     /// ```rust,no_run
     /// use grapple_db::scylla::Client;
     ///
+    /// // Assuming you have a `User` model defined with `Charybdis`
+    /// # #[grapple_db::scylla::macros::charybdis_model(
+    /// #       table_name = users,
+    /// #       partition_keys = [id],
+    /// #       clustering_keys = [],
+    /// #   )]
+    /// # #[derive(Debug, Default)]
+    /// # struct User {
+    /// #     id: String,
+    /// # }
+    ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///     
-    ///     let users = vec![/* ... users to delete ... */];
+    ///     let users: Vec<User> = vec![/* ... users to delete ... */];
     ///     client.delete_many(&users, 1000).await?;
     ///     
     ///     Ok(())
@@ -734,6 +840,18 @@ impl Client {
     /// ```rust,no_run
     /// use grapple_db::scylla::Client;
     /// use futures::StreamExt;
+    /// use grapple_db::scylla::operations::Find;
+    ///
+    /// // Assuming you have a `User` model defined with `Charybdis`
+    /// # #[grapple_db::scylla::macros::charybdis_model(
+    /// #       table_name = users,
+    /// #       partition_keys = [id],
+    /// #       clustering_keys = [],
+    /// #   )]
+    /// # #[derive(Debug, Default)]
+    /// # struct User {
+    /// #     id: String,
+    /// # }
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -939,9 +1057,10 @@ impl Client {
     ///
     /// ```rust,no_run
     /// use grapple_db::scylla::Client;
+    /// use grapple_db::scylla::Result;
     ///
     /// #[tokio::main]
-    /// async fn main() -> Result<(), Box> {
+    /// async fn main() -> Result<()> {
     ///     let client = Client::default().await?;
     ///
     ///     client.recreate_keyspace("test_keyspace").await?;
@@ -1125,7 +1244,7 @@ impl Client {
     /// }
     /// ```
     pub async fn with_keyspaces(self, names: &[&str]) -> Result<Self> {
-        for name in names.as_ref() {
+        for name in names {
             self.create_keyspace(name).await?;
         }
 
@@ -1196,7 +1315,7 @@ impl Client {
     /// }
     /// ```
     pub async fn without_keyspaces(self, names: &[&str]) -> Result<Self> {
-        for name in names.as_ref() {
+        for name in names {
             self.drop_keyspace(name).await?;
         }
 
@@ -1343,7 +1462,7 @@ impl Client {
             builder = builder.keyspace(keyspace.to_owned());
         }
 
-        let migration = builder.build(&session).await;
+        let migration = builder.build(session).await;
 
         migration.run().await;
 

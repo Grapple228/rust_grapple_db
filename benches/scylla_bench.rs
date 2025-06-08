@@ -118,7 +118,7 @@ impl Post {
         }
 
         Post::batch()
-            .chunked_insert(&db_session, &posts, 10000)
+            .chunked_insert(db_session, &posts, 10000)
             .await
             .expect("Failed to insert posts");
     }
@@ -239,7 +239,7 @@ fn bench_orm_vs_native(c: &mut Criterion) {
     let session = rt.block_on(async { setup_database().await });
     let session = Arc::new(session);
 
-    let client = Client::from_session(session.clone()).unwrap();
+    let client = Client::from_session(&session).unwrap();
 
     let test_user = BenchUser {
         id: Uuid::new_v4(),
