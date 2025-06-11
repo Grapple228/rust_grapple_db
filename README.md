@@ -303,6 +303,9 @@ let entities: Vec<User> = vec![];
 client.insert_many(&entities, chunk_size).await?;
 client.update_many(&entities, chunk_size).await?;
 client.delete_many(&entities, chunk_size).await?;
+
+let queries = entities.iter().map(|u| User::find_by_id(u.id.clone())).collect::<Vec<_>>();
+let got: Vec<User> = client.get_many(queries).await?;
 ```
 
 ### Benchmarking
