@@ -45,9 +45,10 @@
 use super::Result;
 use crate::redis::{RedisModel, RedisModelCollector};
 use deadpool_redis::{
-    redis::{AsyncCommands, Expiry, ToRedisArgs},
+    redis::{AsyncCommands, Expiry, FromRedisValue},
     Config, Connection, Pool,
 };
+use futures::future::join_all;
 use std::fmt::Debug;
 
 /// A Redis client for managing connections to a Redis database.
@@ -170,95 +171,85 @@ impl Client {
 
 // Get
 impl Client {
-    /// Retrieves a value from Redis associated with the given key.
+    /// Asynchronously retrieves a value from Redis using the provided key.
     ///
-    /// This asynchronous method fetches the value of type `M` from Redis using the provided key.
-    /// If the key does not exist, it returns `None`. The method requires that `M` implements the
-    /// `RedisModel` trait, and `K` must implement `ToRedisArgs`, as well as be `Send` and `Sync`.
+    /// This method fetches the value associated with the specified key from Redis. If the key exists, it returns
+    /// the value deserialized into the type `V`. The type `V` must implement the `FromRedisValue` trait.
     ///
     /// # Arguments
     ///
-    /// * `key` - The key to look up in Redis.
+    /// * `key` - A reference to a string slice that represents the key for which the value is to be retrieved.
     ///
     /// # Returns
     ///
-    /// A `Result` containing an `Option<M>`, where `Some(M)` is the value retrieved from Redis,
+    /// A `Result` containing an `Option<V>`, where `Some(value)` is the deserialized value if the key exists,
     /// or `None` if the key does not exist.
     ///
     /// # Examples
     ///
     /// ```rust,no_run
     /// use grapple_db::redis::Client;
-    /// # use grapple_db::redis::RedisModel;
+    /// # use grapple_db::redis;
     /// # use grapple_db::redis::macros::FromRedisValue;
-    /// # use grapple_db::redis::FromRedisValue;
     /// # use serde::{Serialize, Deserialize};
     ///
-    /// // Assuming you have a model defined with trait `RedisModel` implemented`
-    /// # #[derive(Serialize, Deserialize, FromRedisValue)]
-    /// # struct MyModel {
+    /// // Assuming you have a type defined with trait `FromRedisValue` implemented
+    /// # #[derive(Debug,Serialize, Deserialize, FromRedisValue)]
+    /// # struct MyValue {
     /// #     a: u64,
-    /// # }
-    /// #
-    /// # impl RedisModel for MyModel {
-    /// #     fn key(&self) -> String {
-    /// #         self.a.to_string()
-    /// #     }
     /// # }
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///
-    ///     let value: Option<MyModel> = client.get("my_key").await?;
+    ///     let key = "some_key";
+    ///     let result: Option<MyValue> = client.get(key).await?;
+    ///
+    ///     if let Some(value) = result {
+    ///         println!("Retrieved value: {:?}", value);
+    ///     } else {
+    ///         println!("No value found for key: {}", key);
+    ///     }
     ///
     ///     Ok(())
     /// }
     /// ```
-    pub async fn get<K, M>(&self, key: K) -> Result<Option<M>>
+    pub async fn get<V>(&self, key: impl AsRef<str>) -> Result<Option<V>>
     where
-        M: RedisModel,
-        K: ToRedisArgs + Send + Sync,
+        V: FromRedisValue,
     {
         let mut connection = self.connection().await?;
-        Ok(connection.get::<K, Option<M>>(key).await?)
+        Ok(connection.get(key.as_ref()).await?)
     }
 
-    /// Retrieves multiple values from Redis associated with the given keys.
+    /// Asynchronously retrieves multiple values from Redis using the provided keys.
     ///
-    /// This asynchronous method fetches values of type `M` from Redis using the provided keys.
-    /// If any of the keys do not exist, their corresponding entries in the result will be `None`.
-    /// The method requires that `M` implements the `RedisModel` trait, and `K` must implement
-    /// `ToRedisArgs`, as well as be `Send` and `Sync`.
+    /// This method fetches the values associated with the specified keys from Redis. It returns a vector of `Option<V>`,
+    /// where each `Option` contains the deserialized value if the corresponding key exists, or `None` if it does not.
+    /// The type `V` must implement the `FromRedisValue` trait.
     ///
     /// # Arguments
     ///
-    /// * `keys` - A reference to a slice of keys to look up in Redis.
+    /// * `keys` - An iterable collection of string slices representing the keys for which the values are to be retrieved.
     ///
     /// # Returns
     ///
-    /// A `Result` containing a `Vec<Option<M>>`, where each entry is the value retrieved from Redis.
-    /// If a key does not exist, its corresponding entry in the vector will be `None`.
+    /// A `Result` containing a `Vec<Option<V>>`, where each element corresponds to a key in the input collection,
+    /// with `Some(value)` for existing keys and `None` for non-existing keys.
     ///
     /// # Examples
     ///
     /// ```rust,no_run
     /// use grapple_db::redis::Client;
-    /// # use grapple_db::redis::RedisModel;
-    /// # use grapple_db::redis::FromRedisValue;
+    /// # use grapple_db::redis;
     /// # use grapple_db::redis::macros::FromRedisValue;
     /// # use serde::{Serialize, Deserialize};
     ///
-    /// // Assuming you have a model defined with trait `RedisModel` implemented
-    /// # #[derive(Serialize, Deserialize, FromRedisValue)]
-    /// # struct MyModel {
+    /// // Assuming you have a type defined with trait `FromRedisValue` implemented
+    /// # #[derive(Debug,Serialize, Deserialize, FromRedisValue)]
+    /// # struct MyValue {
     /// #     a: u64,
-    /// # }
-    /// #
-    /// # impl RedisModel for MyModel {
-    /// #     fn key(&self) -> String {
-    /// #         self.a.to_string()
-    /// #     }
     /// # }
     ///
     /// #[tokio::main]
@@ -266,167 +257,172 @@ impl Client {
     ///     let client = Client::default().await?;
     ///
     ///     let keys = vec!["key1", "key2", "key3"];
-    ///     let values: Vec<Option<MyModel>> = client.mget(keys).await?;
+    ///     let results: Vec<Option<MyValue>> = client.mget(&keys).await?;
+    ///
+    ///     for (key, value) in keys.iter().zip(results) {
+    ///         match value {
+    ///             Some(v) => println!("Retrieved value for {}: {:?}", key, v),
+    ///             None => println!("No value found for key: {}", key),
+    ///         }
+    ///     }
     ///
     ///     Ok(())
     /// }
     /// ```
-    pub async fn mget<K, M>(&self, keys: impl AsRef<[K]>) -> Result<Vec<Option<M>>>
+    pub async fn mget<'a, K, T, V>(&self, keys: K) -> Result<Vec<Option<V>>>
     where
-        M: RedisModel,
-        K: ToRedisArgs + Send + Sync,
+        V: FromRedisValue,
+        K: IntoIterator<Item = T>,
+        T: AsRef<str>,
     {
         let mut connection = self.connection().await?;
-        Ok(connection.mget(keys.as_ref()).await?)
+        Ok(connection.mget(Self::map_keys(keys)).await?)
     }
 
-    /// Retrieves a value from Redis associated with the given key and sets an expiration time.
+    /// Asynchronously retrieves a value from Redis using the provided key and sets an expiration time.
     ///
-    /// This asynchronous method fetches the value of type `M` from Redis using the provided key
-    /// and sets an expiration time for that key. If the key does not exist, it returns `None`.
-    /// The method requires that `M` implements the `RedisModel` trait, and `K` must implement
-    /// `ToRedisArgs`, as well as be `Send` and `Sync`.
+    /// This method fetches the value associated with the specified key from Redis and sets an expiration time for that key.
+    /// If the key exists, it returns the value deserialized into the type `V`. The type `V` must implement the `FromRedisValue` trait.
+    /// The `expire_at` parameter specifies when the key should expire.
     ///
     /// # Arguments
     ///
-    /// * `key` - The key to look up in Redis.
-    /// * `expire_at` - An `Expiry` instance that specifies the expiration time for the key.
+    /// * `key` - A reference to a string slice that represents the key for which the value is to be retrieved.
+    /// * `expire_at` - An `Expiry` value indicating when the key should expire.
     ///
     /// # Returns
     ///
-    /// A `Result` containing an `Option<M>`, where `Some(M)` is the value retrieved from Redis,
+    /// A `Result` containing an `Option<V>`, where `Some(value)` is the deserialized value if the key exists,
     /// or `None` if the key does not exist.
     ///
     /// # Examples
     ///
     /// ```rust,no_run
     /// use grapple_db::redis::Client;
-    /// # use grapple_db::redis::RedisModel;
-    /// # use grapple_db::redis::FromRedisValue;
-    /// # use grapple_db::redis::macros::FromRedisValue;
-    /// # use serde::{Serialize, Deserialize};
+    /// # use grapple_db::redis;
     /// # use grapple_db::redis::Expiry;
+    /// # use grapple_db::redis::macros::FromRedisValue;
+    /// # use serde::{Serialize, Deserialize};
     ///
-    /// // Assuming you have a model defined with trait `RedisModel` implemented
-    /// # #[derive(Serialize, Deserialize, FromRedisValue)]
-    /// # struct MyModel {
+    /// // Assuming you have a type defined with trait `FromRedisValue` implemented
+    /// # #[derive(Debug,Serialize, Deserialize, FromRedisValue)]
+    /// # struct MyValue {
     /// #     a: u64,
-    /// # }
-    /// #
-    /// # impl RedisModel for MyModel {
-    /// #     fn key(&self) -> String {
-    /// #         self.a.to_string()
-    /// #     }
     /// # }
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///
-    ///     let expire_at = Expiry::EX(60); // Expires in 60 seconds
-    ///     let value: Option<MyModel> = client.get_ex("my_key", expire_at).await?;
+    ///     let key = "some_key";
+    ///     let expire_at = Expiry::EX(60); // Set expiration to 60 seconds
+    ///     let result: Option<MyValue> = client.get_ex(key, expire_at).await?;
+    ///
+    ///     if let Some(value) = result {
+    ///         println!("Retrieved value: {:?}", value);
+    ///     } else {
+    ///         println!("No value found for key: {}", key);
+    ///     }
     ///
     ///     Ok(())
     /// }
     /// ```
-    pub async fn get_ex<K, M>(&self, key: K, expire_at: Expiry) -> Result<Option<M>>
+    pub async fn get_ex<V>(&self, key: impl AsRef<str>, expire_at: Expiry) -> Result<Option<V>>
     where
-        M: RedisModel,
-        K: ToRedisArgs + Send + Sync,
+        V: FromRedisValue,
     {
         let mut connection = self.connection().await?;
-        Ok(connection.get_ex(key, expire_at).await?)
+        Ok(connection.get_ex(key.as_ref(), expire_at).await?)
     }
 
-    /// Retrieves a value from Redis associated with the given key and deletes the key.
+    /// Asynchronously retrieves a value from Redis using the provided key and deletes the key.
     ///
-    /// This asynchronous method fetches the value of type `M` from Redis using the provided key
-    /// and deletes the key from Redis after retrieval. If the key does not exist, it returns `None`.
-    /// The method requires that `M` implements the `RedisModel` trait, and `K` must implement
-    /// `ToRedisArgs`, as well as be `Send` and `Sync`.
+    /// This method fetches the value associated with the specified key from Redis and deletes the key in the process.
+    /// If the key exists, it returns the value deserialized into the type `V`. The type `V` must implement the `FromRedisValue` trait.
     ///
     /// # Arguments
     ///
-    /// * `key` - The key to look up in Redis.
+    /// * `key` - A reference to a string slice that represents the key for which the value is to be retrieved and deleted.
     ///
     /// # Returns
     ///
-    /// A `Result` containing an `Option<M>`, where `Some(M)` is the value retrieved from Redis,
+    /// A `Result` containing an `Option<V>`, where `Some(value)` is the deserialized value if the key exists,
     /// or `None` if the key does not exist.
     ///
     /// # Examples
     ///
     /// ```rust,no_run
     /// use grapple_db::redis::Client;
-    /// # use grapple_db::redis::RedisModel;
-    /// # use grapple_db::redis::FromRedisValue;
+    /// # use grapple_db::redis;
     /// # use grapple_db::redis::macros::FromRedisValue;
     /// # use serde::{Serialize, Deserialize};
     ///
-    /// // Assuming you have a model defined with trait `RedisModel` implemented
-    /// # #[derive(Serialize, Deserialize, FromRedisValue)]
-    /// # struct MyModel {
+    /// // Assuming you have a type defined with trait `FromRedisValue` implemented
+    /// # #[derive(Debug,Serialize, Deserialize, FromRedisValue)]
+    /// # struct MyValue {
     /// #     a: u64,
-    /// # }
-    /// #
-    /// # impl RedisModel for MyModel {
-    /// #     fn key(&self) -> String {
-    /// #         self.a.to_string()
-    /// #     }
     /// # }
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///
-    ///     let value: Option<MyModel> = client.get_del("my_key").await?;
+    ///     let key = "some_key";
+    ///     let result: Option<MyValue> = client.get_del(key).await?;
+    ///
+    ///     if let Some(value) = result {
+    ///         println!("Retrieved and deleted value: {:?}", value);
+    ///     } else {
+    ///         println!("No value found for key: {}", key);
+    ///     }
     ///
     ///     Ok(())
     /// }
     /// ```
-    pub async fn get_del<K, M>(&self, key: K) -> Result<Option<M>>
+    pub async fn get_del<V>(&self, key: impl AsRef<str>) -> Result<Option<V>>
     where
-        M: RedisModel,
-        K: ToRedisArgs + Send + Sync,
+        V: FromRedisValue,
     {
         let mut connection = self.connection().await?;
-        Ok(connection.get_del(key).await?)
+        Ok(connection.get_del(key.as_ref()).await?)
     }
 
-    /// Retrieves the current value associated with the key of the given model and sets a new value.
+    /// Asynchronously retrieves a value from Redis using the key from the provided model and sets a new value.
     ///
-    /// This asynchronous method fetches the current value of type `M` from Redis using the key
-    /// defined in the provided model, and then updates the key with the new value from the model.
-    /// If the key does not exist, it returns `None`. The method requires that `M` implements the
-    /// `RedisModel` trait.
+    /// This method fetches the value associated with the key derived from the provided model and replaces it with a new value
+    /// obtained from the model. If the key exists, it returns the old value deserialized into the type `V`. The type `V` must
+    /// implement the `FromRedisValue` trait. The type `M` must implement the `RedisModel` trait.
     ///
     /// # Arguments
     ///
-    /// * `model` - A reference to the model instance containing the key and the new value to set.
+    /// * `model` - A reference to a model that contains the key and the new value to be set in Redis.
     ///
     /// # Returns
     ///
-    /// A `Result` containing an `Option<M>`, where `Some(M)` is the current value retrieved from Redis,
+    /// A `Result` containing an `Option<V>`, where `Some(value)` is the deserialized old value if the key exists,
     /// or `None` if the key does not exist.
     ///
     /// # Examples
     ///
     /// ```rust,no_run
     /// use grapple_db::redis::Client;
-    /// # use grapple_db::redis::RedisModel;
-    /// # use grapple_db::redis::FromRedisValue;
+    /// # use grapple_db::redis;
     /// # use grapple_db::redis::macros::FromRedisValue;
+    /// # use grapple_db::redis::RedisModel;
     /// # use serde::{Serialize, Deserialize};
     ///
     /// // Assuming you have a model defined with trait `RedisModel` implemented
-    /// # #[derive(Serialize, Deserialize, FromRedisValue)]
+    /// # #[derive(Debug,Serialize, Deserialize, FromRedisValue)]
     /// # struct MyModel {
     /// #     a: u64,
     /// # }
     /// #
     /// # impl RedisModel for MyModel {
-    /// #     fn key(&self) -> String {
-    /// #         self.a.to_string()
+    /// #     fn key(&self) -> Result<String, redis::Error> {
+    /// #         Ok(self.a.to_string())
+    /// #     }
+    /// #     fn value(&self) -> Result<String, redis::Error> {
+    /// #         Ok((self.a + 1).to_string()) // Example of a new value
     /// #     }
     /// # }
     ///
@@ -435,44 +431,50 @@ impl Client {
     ///     let client = Client::default().await?;
     ///
     ///     let model = MyModel { a: 42 };
-    ///     let current_value: Option<MyModel> = client.getset(&model).await?;
+    ///     let old_value: Option<MyModel> = client.getset(&model).await?;
+    ///
+    ///     if let Some(value) = old_value {
+    ///         println!("Retrieved and replaced old value: {:?}", value);
+    ///     } else {
+    ///         println!("No value found for key: {}", model.key()?);
+    ///     }
     ///
     ///     Ok(())
     /// }
     /// ```
-    pub async fn getset<M>(&self, model: &M) -> Result<Option<M>>
+    pub async fn getset<M, V>(&self, model: &M) -> Result<Option<V>>
     where
         M: RedisModel,
+        V: FromRedisValue,
     {
         let mut connection = self.connection().await?;
-        Ok(connection.getset(model.key(), model.value()?).await?)
+        Ok(connection.getset(model.key()?, model.value()?).await?)
     }
 }
 
 // Set
 impl Client {
-    /// Sets multiple values in Redis associated with the keys of the given models.
+    /// Asynchronously sets a value in Redis using the key and value from the provided model.
     ///
-    /// This asynchronous method takes a collection of models and sets their values in Redis using
-    /// the keys defined in each model. If any of the models do not have a valid key or value, the
-    /// operation may fail. The method requires that `M` implements the `RedisModel` trait.
+    /// This method stores the key-value pair in Redis, where the key is derived from the provided model and the
+    /// value is also obtained from the model. If the operation is successful, it returns a confirmation message.
+    /// The type `M` must implement the `RedisModel` trait.
     ///
     /// # Arguments
     ///
-    /// * `models` - A collection of model instances to be set in Redis.
+    /// * `model` - A reference to a model that contains the key and value to be stored in Redis.
     ///
     /// # Returns
     ///
-    /// A `Result` containing a `String` indicating the status of the operation. On success, it
-    /// returns `OK` from Redis.
+    /// A `Result` containing a `String` confirmation message indicating the success of the operation.
     ///
     /// # Examples
     ///
     /// ```rust,no_run
     /// use grapple_db::redis::Client;
-    /// # use grapple_db::redis::RedisModel;
-    /// # use grapple_db::redis::FromRedisValue;
+    /// # use grapple_db::redis;
     /// # use grapple_db::redis::macros::FromRedisValue;
+    /// # use grapple_db::redis::RedisModel;
     /// # use serde::{Serialize, Deserialize};
     ///
     /// // Assuming you have a model defined with trait `RedisModel` implemented
@@ -482,8 +484,62 @@ impl Client {
     /// # }
     /// #
     /// # impl RedisModel for MyModel {
-    /// #     fn key(&self) -> String {
-    /// #         self.a.to_string()
+    /// #     fn key(&self) -> Result<String, redis::Error> {
+    /// #         Ok(self.a.to_string())
+    /// #     }
+    /// # }
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let client = Client::default().await?;
+    ///
+    ///     let model = MyModel { a: 42 };
+    ///     let result: String = client.set(&model).await?;
+    ///
+    ///     Ok(())
+    /// }
+    /// ```
+    pub async fn set<M>(&self, model: &M) -> Result<String>
+    where
+        M: RedisModel,
+    {
+        let mut connection = self.connection().await?;
+        Ok(connection.set(model.key()?, model.value()?).await?)
+    }
+
+    /// Asynchronously sets multiple values in Redis using the keys and values from the provided models.
+    ///
+    /// This method takes a collection of models that implement the `RedisModel` trait and stores their key-value
+    /// pairs in Redis. If the operation is successful, it returns a confirmation message. The type `M` must
+    /// implement the `RedisModel` trait.
+    ///
+    /// # Arguments
+    ///
+    /// * `models` - A collection of models to be stored in Redis.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a `String` confirmation message indicating the success of the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use grapple_db::redis::Client;
+    /// # use grapple_db::redis;
+    /// # use grapple_db::redis::macros::FromRedisValue;
+    /// # use grapple_db::redis::RedisModel;
+    /// # use grapple_db::redis::RedisModelCollector;
+    /// # use serde::{Serialize, Deserialize};
+    ///
+    /// // Assuming you have a model defined with trait `RedisModel` implemented
+    /// # #[derive(Serialize, Deserialize, FromRedisValue)]
+    /// # struct MyModel {
+    /// #     a: u64,
+    /// # }
+    /// #
+    /// # impl RedisModel for MyModel {
+    /// #     fn key(&self) -> Result<String, redis::Error> {
+    /// #         Ok(self.a.to_string())
     /// #     }
     /// # }
     ///
@@ -505,28 +561,30 @@ impl Client {
         Ok(connection.mset(&models.collect()).await?)
     }
 
-    /// Sets a value in Redis associated with the key of the given model.
+    /// Asynchronously sets multiple values in Redis using the keys and values from the provided models, only if the keys do not already exist.
     ///
-    /// This asynchronous method takes a model and sets its value in Redis using the key defined
-    /// in the model. If the operation is successful, it returns an `OK` from Redis.
-    /// The method requires that `M` implements the `RedisModel` trait.
+    /// This method takes a collection of models that implement the `RedisModel` trait and stores their key-value
+    /// pairs in Redis only if the keys are not already present. If the operation is successful and no keys were
+    /// overwritten, it returns `true`. If any of the keys already exist, it returns `false`. The type `M` must
+    /// implement the `RedisModel` trait.
     ///
     /// # Arguments
     ///
-    /// * `model` - A reference to the model instance containing the key and the value to set.
+    /// * `models` - A collection of models to be stored in Redis.
     ///
     /// # Returns
     ///
-    /// A `Result` containing a `String` indicating the status of the operation. On success, it
-    /// returns `OK` from Redis.
+    /// A `Result` containing a `bool`, where `true` indicates that the values were set successfully without
+    /// overwriting existing keys, and `false` indicates that at least one key already existed.
     ///
     /// # Examples
     ///
     /// ```rust,no_run
     /// use grapple_db::redis::Client;
-    /// # use grapple_db::redis::RedisModel;
-    /// # use grapple_db::redis::FromRedisValue;
+    /// # use grapple_db::redis;
     /// # use grapple_db::redis::macros::FromRedisValue;
+    /// # use grapple_db::redis::RedisModel;
+    /// # use grapple_db::redis::RedisModelCollector;
     /// # use serde::{Serialize, Deserialize};
     ///
     /// // Assuming you have a model defined with trait `RedisModel` implemented
@@ -536,63 +594,8 @@ impl Client {
     /// # }
     /// #
     /// # impl RedisModel for MyModel {
-    /// #     fn key(&self) -> String {
-    /// #         self.a.to_string()
-    /// #     }
-    /// # }
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let client = Client::default().await?;
-    ///
-    ///     let model = MyModel { a: 42 };
-    ///     let result: String = client.set(&model).await?;
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    pub async fn set<M>(&self, model: &M) -> Result<String>
-    where
-        M: RedisModel,
-    {
-        let mut connection = self.connection().await?;
-        Ok(connection.set(model.key(), model.value()?).await?)
-    }
-
-    /// Sets multiple values in Redis associated with the keys of the given models only if the keys do not already exist.
-    ///
-    /// This asynchronous method takes a collection of models and sets their values in Redis using
-    /// the keys defined in each model, but only if those keys are not already present in Redis.
-    /// If any of the models have a key that already exists, the operation will not set any values.
-    /// The method requires that `M` implements the `RedisModel` trait.
-    ///
-    /// # Arguments
-    ///
-    /// * `models` - A collection of model instances to be set in Redis.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing a `bool`, which indicates whether the operation was successful. It returns
-    /// `true` if all values were set successfully, or `false` if any key already existed.
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use grapple_db::redis::Client;
-    /// # use grapple_db::redis::RedisModel;
-    /// # use grapple_db::redis::FromRedisValue;
-    /// # use grapple_db::redis::macros::FromRedisValue;
-    /// # use serde::{Serialize, Deserialize};
-    ///
-    /// // Assuming you have a model defined with trait `RedisModel` implemented
-    /// # #[derive(Serialize, Deserialize, FromRedisValue)]
-    /// # struct MyModel {
-    /// #     a: u64,
-    /// # }
-    /// #
-    /// # impl RedisModel for MyModel {
-    /// #     fn key(&self) -> String {
-    /// #         self.a.to_string()
+    /// #     fn key(&self) -> Result<String, redis::Error> {
+    /// #         Ok(self.a.to_string())
     /// #     }
     /// # }
     ///
@@ -601,7 +604,7 @@ impl Client {
     ///     let client = Client::default().await?;
     ///
     ///     let models = vec![&MyModel { a: 1 }, &MyModel { a: 2 }];
-    ///     let success: bool = client.mset_nx(&models).await?;
+    ///     let result: bool = client.mset_nx(&models).await?;
     ///
     ///     Ok(())
     /// }
@@ -614,29 +617,29 @@ impl Client {
         Ok(connection.mset_nx(&models.collect()).await?)
     }
 
-    /// Sets a value in Redis associated with the key of the given model only if the key does not already exist.
+    /// Asynchronously sets a value in Redis using the key and value from the provided model, only if the key does not already exist.
     ///
-    /// This asynchronous method takes a model and sets its value in Redis using the key defined
-    /// in the model, but only if that key is not already present in Redis. If the operation is
-    /// successful, it returns `true` from Redis, `false` in other cases. The method requires that `M` implements
-    /// the `RedisModel` trait.
+    /// This method stores the key-value pair in Redis, where the key is derived from the provided model and the
+    /// value is also obtained from the model. If the key already exists, it does not overwrite the existing value
+    /// and returns `false`. If the operation is successful and the key was set, it returns `true`. The type `M`
+    /// must implement the `RedisModel` trait.
     ///
     /// # Arguments
     ///
-    /// * `model` - A reference to the model instance containing the key and the value to set.
+    /// * `model` - A reference to a model that contains the key and value to be stored in Redis.
     ///
     /// # Returns
     ///
-    /// A `Result` containing a `bool`, which indicates whether the operation was successful. It returns
-    /// `true` if all values were set successfully, or `false` if any key already existed.
+    /// A `Result` containing a `bool`, where `true` indicates that the value was set successfully, and `false`
+    /// indicates that the key already existed.
     ///
     /// # Examples
     ///
     /// ```rust,no_run
     /// use grapple_db::redis::Client;
-    /// # use grapple_db::redis::RedisModel;
-    /// # use grapple_db::redis::FromRedisValue;
+    /// # use grapple_db::redis;
     /// # use grapple_db::redis::macros::FromRedisValue;
+    /// # use grapple_db::redis::RedisModel;
     /// # use serde::{Serialize, Deserialize};
     ///
     /// // Assuming you have a model defined with trait `RedisModel` implemented
@@ -646,8 +649,8 @@ impl Client {
     /// # }
     /// #
     /// # impl RedisModel for MyModel {
-    /// #     fn key(&self) -> String {
-    /// #         self.a.to_string()
+    /// #     fn key(&self) -> Result<String, redis::Error> {
+    /// #         Ok(self.a.to_string())
     /// #     }
     /// # }
     ///
@@ -656,7 +659,7 @@ impl Client {
     ///     let client = Client::default().await?;
     ///
     ///     let model = MyModel { a: 42 };
-    ///     let success: bool = client.set_nx(&model).await?;
+    ///     let result: bool = client.set_nx(&model).await?;
     ///
     ///     Ok(())
     /// }
@@ -666,33 +669,32 @@ impl Client {
         M: RedisModel,
     {
         let mut connection = self.connection().await?;
-        Ok(connection.set_nx(model.key(), model.value()?).await?)
+        Ok(connection.set_nx(model.key()?, model.value()?).await?)
     }
 
-    /// Sets a value in Redis associated with the key of the given model and sets an expiration time.
+    /// Asynchronously sets a value in Redis using the key and value from the provided model, with an expiration time.
     ///
-    /// This asynchronous method takes a model and sets its value in Redis using the key defined
-    /// in the model, along with an expiration time specified in seconds. If the operation is
-    /// successful, it returns `OK` from Redis. The method requires that `M` implements
-    /// the `RedisModel` trait.
+    /// This method stores the key-value pair in Redis, where the key is derived from the provided model and the
+    /// value is also obtained from the model. The key will expire after the specified number of seconds. If the
+    /// operation is successful, it returns a confirmation message. The type `M` must implement the `RedisModel`
+    /// trait.
     ///
     /// # Arguments
     ///
-    /// * `model` - A reference to the model instance containing the key and the value to set.
-    /// * `secs` - The expiration time in seconds for the key.
+    /// * `model` - A reference to a model that contains the key and value to be stored in Redis.
+    /// * `secs` - The number of seconds after which the key should expire.
     ///
     /// # Returns
     ///
-    /// A `Result` containing a `String` indicating the status of the operation. On success, it
-    /// returns `OK` from Redis.
+    /// A `Result` containing a `String` confirmation message indicating the success of the operation.
     ///
     /// # Examples
     ///
     /// ```rust,no_run
     /// use grapple_db::redis::Client;
-    /// # use grapple_db::redis::RedisModel;
-    /// # use grapple_db::redis::FromRedisValue;
+    /// # use grapple_db::redis;
     /// # use grapple_db::redis::macros::FromRedisValue;
+    /// # use grapple_db::redis::RedisModel;
     /// # use serde::{Serialize, Deserialize};
     ///
     /// // Assuming you have a model defined with trait `RedisModel` implemented
@@ -702,8 +704,8 @@ impl Client {
     /// # }
     /// #
     /// # impl RedisModel for MyModel {
-    /// #     fn key(&self) -> String {
-    /// #         self.a.to_string()
+    /// #     fn key(&self) -> Result<String, redis::Error> {
+    /// #         Ok(self.a.to_string())
     /// #     }
     /// # }
     ///
@@ -712,7 +714,7 @@ impl Client {
     ///     let client = Client::default().await?;
     ///
     ///     let model = MyModel { a: 42 };
-    ///     let result: String = client.set_ex(&model, 60).await?; // Expires in 60 seconds
+    ///     let result: String = client.set_ex(&model, 60).await?; // Set with 60 seconds expiration
     ///
     ///     Ok(())
     /// }
@@ -722,18 +724,18 @@ impl Client {
         M: RedisModel,
     {
         let mut connection = self.connection().await?;
-        Ok(connection.set_ex(model.key(), model.value()?, secs).await?)
+        Ok(connection
+            .set_ex(model.key()?, model.value()?, secs)
+            .await?)
     }
 }
 
 // Del
 impl Client {
-    /// Deletes the specified key from Redis.
+    /// Asynchronously deletes a key from Redis.
     ///
-    /// This asynchronous method removes the value associated with the given key from Redis. If the
-    /// key exists and is successfully deleted, it returns the number of keys that were removed (1).
-    /// If the key does not exist, it returns 0. The method requires that `K` implements the
-    /// `ToRedisArgs` trait, as well as being `Send` and `Sync`.
+    /// This method removes the specified key from Redis. If the key exists and is successfully deleted, it returns
+    /// the number of keys that were removed (which will be 1). If the key does not exist, it returns 0.
     ///
     /// # Arguments
     ///
@@ -741,13 +743,14 @@ impl Client {
     ///
     /// # Returns
     ///
-    /// A `Result` containing a `usize`, which indicates the number of keys that were removed. This
-    /// will be 1 if the key was successfully deleted, or 0 if the key did not exist.
+    /// A `Result` containing a `usize`, which indicates the number of keys that were removed. This will be 1 if
+    /// the key was successfully deleted, or 0 if the key did not exist.
     ///
     /// # Examples
     ///
     /// ```rust,no_run
     /// use grapple_db::redis::Client;
+    /// # use grapple_db::redis;
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -755,27 +758,91 @@ impl Client {
     ///
     ///     let deleted_count: usize = client.del("my_key").await?;
     ///
-    ///     println!("Number of keys deleted: {}", deleted_count);
+    ///     Ok(())
+    /// }
+    /// ```
+    pub async fn del(&self, key: impl AsRef<str>) -> Result<usize> {
+        let mut connection = self.connection().await?;
+        Ok(connection.del(key.as_ref()).await?)
+    }
+
+    /// Asynchronously deletes multiple keys from Redis.
+    ///
+    /// This method removes the specified keys from Redis. It takes an iterable collection of keys and attempts to delete
+    /// each one. The method returns the total number of keys that were successfully removed. If a key does not exist, it
+    /// is simply ignored in the count.
+    ///
+    /// # Arguments
+    ///
+    /// * `keys` - An iterable collection of keys to be deleted from Redis.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a `usize`, which indicates the number of keys that were successfully removed. This count
+    /// reflects only the keys that existed and were deleted.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use grapple_db::redis::Client;
+    /// # use grapple_db::redis;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let client = Client::default().await?;
+    ///
+    ///     let deleted_count: usize = client.mdel(vec!["key1", "key2", "key3"]).await?;
     ///
     ///     Ok(())
     /// }
     /// ```
-    pub async fn del<K>(&self, key: K) -> Result<usize>
+    pub async fn mdel<'a, K, T>(&self, keys: K) -> Result<usize>
     where
-        K: ToRedisArgs + Send + Sync,
+        K: IntoIterator<Item = T>,
+        T: AsRef<str>,
     {
-        let mut connection = self.connection().await?;
-        Ok(connection.del(key).await?)
+        let mut futures = vec![];
+
+        for key in Self::map_keys(keys) {
+            futures.push(self.del(key));
+        }
+
+        // Ожидаем завершения всех операций удаления
+        let results = join_all(futures).await;
+
+        // Возвращаем количество успешно удаленных ключей
+        Ok(results.iter().filter(|result| result.is_ok()).count())
     }
 }
 
 // Other
 impl Client {
-    /// Checks if the specified key exists in Redis.
+    /// Converts an iterable collection of keys into a vector of strings.
     ///
-    /// This asynchronous method verifies whether the given key is present in Redis. It returns
-    /// `true` if the key exists and `false` if it does not. The method requires that `K` implements
-    /// the `ToRedisArgs` trait, as well as being `Send` and `Sync`.
+    /// This function takes an iterable collection of keys and maps each key to a `String`. It is useful for ensuring
+    /// that the keys are in the correct format for further processing, such as deletion from Redis.
+    ///
+    /// # Arguments
+    ///
+    /// * `keys` - An iterable collection of keys, where each key can be referenced as a string.
+    ///
+    /// # Returns
+    ///
+    /// A `Vec<String>` containing the keys converted to `String` format.
+    /// ```
+    #[inline]
+    fn map_keys<K, T>(keys: K) -> Vec<String>
+    where
+        K: IntoIterator<Item = T>,
+        T: AsRef<str>,
+    {
+        keys.into_iter().map(|k| k.as_ref().to_string()).collect()
+    }
+
+    /// Asynchronously checks if a key exists in Redis.
+    ///
+    /// This method checks whether the specified key is present in Redis. If the key exists, it returns `true`;
+    /// otherwise, it returns `false`. The type `K` must implement `ToRedisArgs` and be both `Send` and `Sync`.
     ///
     /// # Arguments
     ///
@@ -783,45 +850,36 @@ impl Client {
     ///
     /// # Returns
     ///
-    /// A `Result` containing a `bool`, which indicates whether the key exists (`true`) or not (`false`).
+    /// A `Result` containing a `bool`, where `true` indicates that the key exists, and `false` indicates that it does not.
     ///
     /// # Examples
     ///
     /// ```rust,no_run
     /// use grapple_db::redis::Client;
+    /// # use grapple_db::redis;
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///
-    ///     let key_exists: bool = client.exists("my_key").await?;
-    ///
-    ///     if key_exists {
-    ///         println!("The key exists in Redis.");
-    ///     } else {
-    ///         println!("The key does not exist in Redis.");
-    ///     }
+    ///     let exists: bool = client.exists("my_key").await?;
     ///
     ///     Ok(())
     /// }
     /// ```
-    pub async fn exists<K>(&self, key: K) -> Result<bool>
-    where
-        K: ToRedisArgs + Send + Sync,
-    {
+    pub async fn exists(&self, key: impl AsRef<str>) -> Result<bool> {
         let mut connection = self.connection().await?;
-        Ok(connection.exists(key).await?)
+        Ok(connection.exists(key.as_ref()).await?)
     }
 
-    /// Sends a PING command to the Redis server to check connectivity.
+    /// Asynchronously sends a ping command to Redis to check the connection.
     ///
-    /// This asynchronous method sends a PING command to the Redis server and expects a PONG response.
-    /// It is useful for verifying that the connection to the Redis server is active and functioning.
-    /// The method returns a `Result` containing a `String` with the response from the server.
+    /// This method sends a ping command to the Redis server. If the server is reachable and responsive, it returns
+    /// a confirmation message (usually "PONG"). If there is an issue with the connection, an error will be returned.
     ///
     /// # Returns
     ///
-    /// A `Result` containing a `String`, which will be "PONG" if the server is reachable and responsive.
+    /// A `Result` containing a `String`, which is the response from the Redis server, typically "PONG".
     ///
     /// # Examples
     ///
@@ -833,7 +891,6 @@ impl Client {
     ///     let client = Client::default().await?;
     ///
     ///     let response: String = client.ping().await?;
-    ///     println!("Response from Redis: {}", response);
     ///
     ///     Ok(())
     /// }
@@ -843,12 +900,11 @@ impl Client {
         Ok(connection.ping().await?)
     }
 
-    /// Renames a key in Redis.
+    /// Asynchronously renames a key in Redis.
     ///
-    /// This asynchronous method renames the specified key to a new key. If the operation is successful,
-    /// it returns `OK` from Redis. If the new key already exists, the operation will fail.
-    /// The method requires that both `K` and `N` implement the `ToRedisArgs` trait, as well as being
-    /// `Send` and `Sync`.
+    /// This method renames the specified key to a new key. If the operation is successful, it returns a confirmation
+    /// message. If the new key already exists, it will be overwritten. The types `K` and `N` must implement
+    /// `ToRedisArgs` and be both `Send` and `Sync`.
     ///
     /// # Arguments
     ///
@@ -857,8 +913,7 @@ impl Client {
     ///
     /// # Returns
     ///
-    /// A `Result` containing a `String`, which indicates the status of the operation. On success,
-    /// it returns `OK` from Redis.
+    /// A `Result` containing a `String` confirmation message indicating the success of the operation.
     ///
     /// # Examples
     ///
@@ -869,28 +924,22 @@ impl Client {
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///
-    ///     let result: String = client.rename("old_key", "new_key").await?;
-    ///     println!("Rename result: {}", result);
+    ///     let response: String = client.rename("old_key", "new_key").await?;
     ///
     ///     Ok(())
     /// }
     /// ```
-    pub async fn rename<K, N>(&self, key: K, new_key: N) -> Result<String>
-    where
-        K: ToRedisArgs + Send + Sync,
-        N: ToRedisArgs + Send + Sync,
-    {
+    pub async fn rename(&self, key: impl AsRef<str>, new_key: impl AsRef<str>) -> Result<String> {
         let mut connection = self.connection().await?;
-        Ok(connection.rename(key, new_key).await?)
+        Ok(connection.rename(key.as_ref(), new_key.as_ref()).await?)
     }
 
-    /// Renames a key in Redis only if the new key does not already exist.
+    /// Asynchronously renames a key in Redis only if the new key does not already exist.
     ///
-    /// This asynchronous method renames the specified key to a new key, but only if the new key
-    /// does not already exist in Redis. If the operation is successful, it returns `true`.
-    /// If the new key already exists, the operation will not rename the key
-    /// and will return `false`. The method requires that both `K` and `N` implement the `ToRedisArgs` trait,
-    /// as well as being `Send` and `Sync`.
+    /// This method attempts to rename the specified key to a new key name, but only if the new key does not already
+    /// exist in Redis. If the operation is successful and the new key was created, it returns `true`. If the new
+    /// key already exists, it does not perform the rename and returns `false`. The types `K` and `N` must implement
+    /// `ToRedisArgs` and be both `Send` and `Sync`.
     ///
     /// # Arguments
     ///
@@ -899,8 +948,8 @@ impl Client {
     ///
     /// # Returns
     ///
-    /// A `Result` containing a `bool`, which indicates if operation was successfull. This
-    /// will be `true` if the key was successfully renamed, or `false` if the new key already exists.
+    /// A `Result` containing a `bool`, where `true` indicates that the rename was successful, and `false` indicates
+    /// that the new key already existed.
     ///
     /// # Examples
     ///
@@ -916,13 +965,9 @@ impl Client {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn rename_nx<K, N>(&self, key: K, new_key: N) -> Result<bool>
-    where
-        N: ToRedisArgs + Send + Sync,
-        K: ToRedisArgs + Send + Sync,
-    {
+    pub async fn rename_nx(&self, key: impl AsRef<str>, new_key: impl AsRef<str>) -> Result<bool> {
         let mut connection = self.connection().await?;
-        Ok(connection.rename_nx(key, new_key).await?)
+        Ok(connection.rename_nx(key.as_ref(), new_key.as_ref()).await?)
     }
 }
 
@@ -934,6 +979,7 @@ mod tests {
 
     use std::time::Duration;
 
+    use crate::redis;
     use crate::redis::macros::FromRedisValue;
     use crate::redis::RedisModel;
     use serde::{Deserialize, Serialize};
@@ -950,8 +996,8 @@ mod tests {
     }
 
     impl RedisModel for Tst {
-        fn key(&self) -> String {
-            self.key.clone()
+        fn key(&self) -> redis::Result<String> {
+            Ok(self.key.clone())
         }
     }
 
@@ -963,9 +1009,9 @@ mod tests {
             self
         }
 
-        pub fn default(key: &str) -> Self {
+        pub fn default(key: impl AsRef<str>) -> Self {
             Self {
-                key: key.to_string(),
+                key: key.as_ref().to_string(),
                 a: 3,
                 b: 4,
             }
@@ -1014,12 +1060,11 @@ mod tests {
         // Test
         assert_eq!(
             vec![Some(model1.clone()), Some(model2.clone())],
-            client.mget::<_, Tst>(&[key1, key2]).await?
+            client.mget(&[key1, key2]).await?
         );
 
         // Clear
-        client.del(key1).await?;
-        client.del(key2).await?;
+        client.mdel(&[key1, key2]).await?;
 
         Ok(())
     }
@@ -1125,8 +1170,7 @@ mod tests {
         assert_eq!(Some(model2), client.get(key2).await?);
 
         // Clear
-        client.del(key1).await?;
-        client.del(key2).await?;
+        client.mdel(&[key1, key2]).await?;
 
         Ok(())
     }
@@ -1197,18 +1241,17 @@ mod tests {
         assert!(client.mset_nx(&[&model1_before, &model2_before]).await?);
         assert_eq!(
             vec![Some(model1_before.clone()), Some(model2_before.clone())],
-            client.mget::<_, Tst>(&[key1, key2]).await?
+            client.mget(&[key1, key2]).await?
         );
 
         assert!(!client.mset_nx(&[&model1_after, &model2_after]).await?);
         assert_eq!(
             vec![Some(model1_before.clone()), Some(model2_before.clone())],
-            client.mget::<_, Tst>(&[key1, key2]).await?
+            client.mget(&[key1, key2]).await?
         );
 
         // Clear
-        client.del(key1).await?;
-        client.del(key2).await?;
+        client.mdel(&[key1, key2]).await?;
 
         Ok(())
     }
@@ -1233,6 +1276,31 @@ mod tests {
         assert_eq!(1, client.del(key).await?);
 
         assert_eq!(None::<Tst>, client.get(key).await?);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_redis_mdel() -> Result<()> {
+        let client = get_client().await;
+
+        let key1 = "test_redis_mdel1";
+        let key2 = "test_redis_mdel2";
+
+        // Create model
+        let model1 = Tst::default(key1);
+        let model2 = Tst::default(key2);
+
+        client.mset(&[&model1, &model2]).await?;
+
+        assert_eq!(Some(model1), client.get(key1).await?);
+        assert_eq!(Some(model2), client.get(key2).await?);
+
+        // Test
+        client.mdel(&[key1, key2]).await?;
+
+        assert_eq!(None::<Tst>, client.get(key1).await?);
+        assert_eq!(None::<Tst>, client.get(key2).await?);
 
         Ok(())
     }
@@ -1286,6 +1354,9 @@ mod tests {
 
         assert_eq!("OK", client.rename(key, new_key).await?);
 
+        assert_eq!(None, client.get::<Tst>(key).await?);
+        assert_eq!(Some(fx_key_new_model), client.get(new_key).await?);
+
         // Clear
         client.del(key).await?;
 
@@ -1306,14 +1377,19 @@ mod tests {
         // Test
         assert!(client.rename_nx(key, new_key).await?);
 
+        assert_eq!(None, client.get::<Tst>(key).await?);
+        assert_eq!(Some(fx_key_model.clone()), client.get(new_key).await?);
+
         let fx_key_new_model = Tst::default(key);
         client.set(&fx_key_new_model).await?;
 
         assert!(!client.rename_nx(new_key, key).await?);
 
+        assert_eq!(Some(fx_key_model), client.get::<Tst>(key).await?);
+        assert_eq!(Some(fx_key_new_model), client.get(new_key).await?);
+
         // Clear
-        client.del(key).await?;
-        client.del(new_key).await?;
+        client.mdel(&[key, new_key]).await?;
 
         Ok(())
     }

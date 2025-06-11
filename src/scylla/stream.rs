@@ -121,7 +121,7 @@ where
     E: Model + 'static,
 {
     stream: CharybdisModelStream<E>,
-    per_page: i32,
+    per_page: usize,
     page_items: Vec<E>,
 }
 
@@ -142,7 +142,7 @@ where
     /// # Returns
     ///
     /// A new instance of `PagableCharybdisStream`.
-    pub fn new(stream: CharybdisModelStream<E>, per_page: i32) -> Self {
+    pub fn new(stream: CharybdisModelStream<E>, per_page: usize) -> Self {
         Self {
             stream,
             per_page,
@@ -187,6 +187,7 @@ where
         }
     }
 
+    #[inline]
     fn page_items(&self) -> &[E] {
         &self.page_items
     }

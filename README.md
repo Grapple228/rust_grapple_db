@@ -14,6 +14,7 @@
   - [Get](#get)
   - [Set](#set)
   - [Del](#del)
+  - [Batch](#batch)
   - [Other](#other)
   - [Not Covered Methods](#not-covered-methods)
 - [Scylla Examples](#scylla-examples)
@@ -56,12 +57,13 @@ To include `grapple_db` in your project, add it to your dependencies. For exampl
 # Example for Cargo.toml (Rust)
 [dependencies]
 grapple_db = { version = "0.2", features = ["scylla", "redis"] }
-scylla = { version = "1.2.0" } // For `scylla` feature
+scylla = "1.2.0" # for scylla feature
 ```
 
 ## Redis examples
 
-Full code example can be found in [`/examples/redis.rs`](/examples/redis.rs)
+Full code example for tuples can be found in [`/examples/redis_tuple.rs`](/examples/redis_tuple.rs)
+Full code example for models can be found in [`/examples/redis_model.rs`](/examples/redis_model.rs)
 
 ### Create Client
 
@@ -81,10 +83,23 @@ let client = Client::connect(&cfg).await?;
 
 ### Define Model
 
+Tuple
+
+```rust
+use grapple_db::redis::Client;
+
+let id = "tuple_id".to_string();
+let value = 3;
+
+let tuple = (id, value);
+```
+
+Custom model
+
 ```rust
 // Imports
-use grapple_db::redis::macros::FromRedisValue;
-use grapple_db::redis::RedisModel;
+use grapple_db::redis; // If have original redis-rs, then it not needed
+use grapple_db::redis::{macros::FromRedisValue, RedisModel};
 
 // Define struct
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize, FromRedisValue)]
@@ -95,21 +110,38 @@ pub struct Model {
 
 // Implement trait
 impl RedisModel for Model {
-    fn key(&self) -> String {
+    fn key(&self) -> redis::Result<String> {
         // Key for model
-        format!("{}.{}", self.a, self.b)
+        Ok(format!("{}.{}", self.a, self.b))
     }
 }
 ```
 
 ### Get
 
+Tuple
+
 ```rust
-let key = model.key();
+let value: Option<i32> = client.get(&key).await?;
+```
+
+Model
+
+```rust
+let key = model.key()?;
 let value: Option<Model> = client.get(&key).await?;
 ```
 
 ### Set
+
+Tuple
+
+```rust
+let tuple = (id, value);
+client.set(&tuple).await?;
+```
+
+Custom Model
 
 ```rust
 let model = Model::default();
@@ -119,14 +151,33 @@ client.set(&model).await?;
 ### Del
 
 ```rust
-let key = model.key();
 client.del(&key).await?;
+```
+
+### Batch
+
+Delete Batch
+
+```rust
+client.mdel(&keys).await?;
+```
+
+Set batch
+
+```rust
+client.mset(&models).await?;
+```
+
+Get batch
+
+```rust
+client.mget(&keys).await?;
 ```
 
 ### Other
 
 ```rust
-let key = model.key();
+let key = model.key()?;
 let val = client.exists(&key).await?;
 
 let val = client.rename(&key).await?;
@@ -160,6 +211,12 @@ let client = Client::connect(&con_params).await?;
 Any of the models could be used with the same client
 
 ```rust
+use grapple_db::scylla::{
+    charybdis,
+    macros::charybdis_model,
+    types::{Text},
+};
+
 #[charybdis_model(
     table_name = users,
     partition_keys = [id],

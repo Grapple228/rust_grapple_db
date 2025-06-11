@@ -5,7 +5,7 @@
 [env]
 
 # Scope down tracing, to filter out external lib tracing.
-RUST_LOG = "rust_grapple_db=debug"
+RUST_LOG = "grapple_db=debug,redis=debug"
 
 # -- Service Environment Variables
 # IMPORTANT: 

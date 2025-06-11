@@ -24,7 +24,7 @@
 
 // region:    --- Modules
 
-mod client;
+pub mod client;
 mod connection;
 mod crud;
 mod error;
@@ -54,9 +54,11 @@ pub mod macros {
     pub use charybdis::macros::*;
 }
 
-pub use client::Client;
+pub use charybdis::macros::scylla::*;
+pub use client::{CachingSession, Client, Compression, Session, SessionConfig, TlsContext};
 pub use connection::ConnectionParams;
 pub use crud::CrudParams;
 pub use error::{Error, Result};
+pub use scylla::*;
 
 // endregion: --- Modules

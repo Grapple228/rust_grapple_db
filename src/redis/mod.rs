@@ -54,7 +54,8 @@ use serde::{de::DeserializeOwned, Serialize};
 ///
 /// ```rust,no_run
 /// use serde::{Deserialize, Serialize};
-/// use grapple_db::redis::FromRedisValue;
+/// use grapple_db::redis;
+/// use grapple_db::redis::ToRedisArgs;
 /// use grapple_db::redis::Result;
 /// use grapple_db::redis::RedisModel;
 /// use grapple_db::redis::macros::FromRedisValue;
@@ -66,24 +67,34 @@ use serde::{de::DeserializeOwned, Serialize};
 /// }
 ///
 /// impl RedisModel for MyModel {
-///     fn key(&self) -> String {
-///         self.id.clone()
+///     fn key(&self) -> Result<String> {
+///         Ok(self.id.to_string())
 ///     }
 /// }
 ///
-/// fn example(model: &MyModel) -> Result<String> {
-///     let json_value = model.value()?;
-///     Ok(json_value)
+/// fn example(model: &MyModel) -> Result<Vec<Vec<u8>>> {
+///     Ok(model.value()?.to_redis_args())
 /// }
 /// ```
 pub trait RedisModel: FromRedisValue + Serialize + DeserializeOwned {
-    /// Returns a `String` representing the key for the Redis model.
-    /// This key will be used for insertions into the Redis database.
-    fn key(&self) -> String;
-    /// Serializes the model into a JSON string and returns it as a `Result`.
-    /// The serialized JSON will be inserted under the corresponding key in Redis.
-    /// If serialization fails, it returns an error.
-    fn value(&self) -> Result<String> {
+    fn key(&self) -> Result<String>;
+    #[inline]
+    fn value(&self) -> Result<impl ToRedisArgs + Send + Sync> {
         Ok(serde_json::to_string(&self)?)
+    }
+}
+
+impl<V> RedisModel for (String, V)
+where
+    V: Serialize + DeserializeOwned + FromRedisValue + Clone,
+{
+    #[inline]
+    fn key(&self) -> Result<String> {
+        Ok(self.0.clone())
+    }
+
+    #[inline]
+    fn value(&self) -> Result<impl ToRedisArgs + Send + Sync> {
+        Ok(serde_json::to_string(&self.1)?)
     }
 }

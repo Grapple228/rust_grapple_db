@@ -11,20 +11,19 @@ use super::model::Model;
 use super::operations::{CharybdisModelBatch, Delete, Insert, ModelBatch, Update};
 use super::query::{CharybdisQuery, ModelMutation, ModelRow, ModelStream, QueryExecutor};
 use super::stream::CharybdisModelStream;
+use super::Result;
+use super::{ConnectionParams, CrudParams};
 
-use caching_session::CachingSession;
+use charybdis::query::OptionalModelRow;
 use charybdis::scylla::response::query_result::QueryResult;
 use charybdis::scylla::serialize::row::SerializeRow;
 use futures::StreamExt;
-use session::Session;
 use tracing::debug;
 
-#[allow(unused)]
-pub use charybdis::scylla::client::*;
-
-use crate::scylla::{ConnectionParams, CrudParams};
-
-use super::Result;
+pub use scylla::client::caching_session::*;
+pub use scylla::client::session::*;
+pub use scylla::client::session_builder::*;
+pub use scylla::client::*;
 
 /// High-level ScyllaDB client that provides an abstraction layer over the Scylla driver
 ///
@@ -105,8 +104,7 @@ impl Client {
     ///
     /// ```rust,no_run
     /// use std::sync::Arc;
-    /// use scylla::client::caching_session::CachingSession;
-    /// use grapple_db::scylla::Client;
+    /// use grapple_db::scylla::{Client,CachingSession};
     ///
     /// fn create_client_from_session(session: Arc<CachingSession>) -> Result<Client, Box<dyn std::error::Error>> {
     ///     Ok(Client::from_session(&session)?)
@@ -218,7 +216,7 @@ impl Client {
     ///
     /// ```rust,no_run
     /// use grapple_db::scylla::{Client, ConnectionParams, CrudParams};
-    /// use scylla::statement::Consistency;
+    /// use grapple_db::scylla::statement::Consistency;
     /// use std::time::Duration;
     ///
     /// #[tokio::main]
@@ -327,6 +325,73 @@ impl Client {
     /// }
     /// ```
     pub async fn get<'a, Val, E>(&self, query: CharybdisQuery<'a, Val, E, ModelRow>) -> Result<E>
+    where
+        Val: SerializeRow + Sync + Send,
+        E: Model + Sync + Send,
+    {
+        debug!("Get query: {}", query.query_string());
+
+        let res = self
+            .query_apply_params(query)
+            .execute(&self.session)
+            .await?;
+
+        Ok(res)
+    }
+
+    /// Executes a query to retrieve an optional entity from the database.
+    ///
+    /// This method executes a Charybdis query that may return a single model instance or no result at all.
+    /// The query is automatically enhanced with any CRUD parameters configured for this client instance.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `Val` - The type of values being serialized for the query
+    /// * `E` - The entity/model type being retrieved
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - A Charybdis query configured to return an optional row
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing an `Option<E>`, where `Some(E)` is the retrieved entity if found, or `None` if no matching record exists.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use grapple_db::scylla::Client;
+    /// use grapple_db::scylla::types::Uuid;
+    ///
+    /// // Assuming you have a `User` model defined with `Charybdis`
+    /// # #[grapple_db::scylla::macros::charybdis_model(
+    /// #       table_name = users,
+    /// #       partition_keys = [id],
+    /// #       clustering_keys = [],
+    /// #   )]
+    /// # #[derive(Debug, Default)]
+    /// # struct User {
+    /// #     id: Uuid,
+    /// # }
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let client = Client::default().await?;
+    ///     
+    ///     // Prepare your query
+    ///     let user_id = Uuid::from_u128(5);
+    ///     let query = User::maybe_find_first_by_id(user_id);
+    ///     
+    ///     // Retrieve the user, which may or may not exist
+    ///     let user: Option<User> = client.get_optional(query).await?;
+    ///
+    ///     Ok(())
+    /// }
+    /// ```
+    pub async fn get_optional<'a, Val, E>(
+        &self,
+        query: CharybdisQuery<'a, Val, E, OptionalModelRow>,
+    ) -> Result<Option<E>>
     where
         Val: SerializeRow + Sync + Send,
         E: Model + Sync + Send,
@@ -1445,8 +1510,7 @@ impl Client {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use grapple_db::scylla::Client;
-    /// use scylla::client::session::Session;
+    /// use grapple_db::scylla::{Client, client::Session};
     ///
     /// async fn run_migrations(session: &Session) -> Result<(), Box<dyn std::error::Error>> {
     ///     Client::migrate(session, &Some("my_keyspace".to_string())).await?;
@@ -1535,3 +1599,369 @@ impl Client {
         }
     }
 }
+
+// region:    --- Tests
+
+#[cfg(test)]
+mod tests {
+    type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>; // For tests.
+
+    use super::*;
+
+    use crate::scylla::{
+        charybdis::{self, macros::charybdis_model, types::Text},
+        Client, ConnectionParams,
+    };
+
+    #[charybdis_model(
+        table_name = users,
+        partition_keys = [id],
+        clustering_keys = [],
+
+        global_secondary_indexes = [name],
+        local_secondary_indexes = [],
+    )]
+    #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+    pub struct Tst {
+        id: Text,
+        name: Option<Text>,
+    }
+
+    impl Tst {
+        fn with_id(id: &str) -> Self {
+            Self {
+                id: id.to_string(),
+                name: None,
+            }
+        }
+
+        fn with_name(mut self, name: impl Into<String>) -> Self {
+            _ = self.name.insert(name.into());
+            self
+        }
+    }
+
+    async fn get_client() -> Client {
+        let params = ConnectionParams {
+            migrate: false,
+            use_keyspace: Some("test".into()),
+
+            ..Default::default()
+        };
+
+        let client = Client::connect(&params).await.unwrap();
+
+        client
+            .execute(
+                "
+        CREATE TABLE IF NOT EXISTS users (
+            id text PRIMARY KEY,
+            name text
+        );
+        ",
+                &[],
+            )
+            .await
+            .unwrap();
+
+        client
+            .execute("CREATE INDEX IF NOT EXISTS ON users (name);", &[])
+            .await
+            .unwrap();
+
+        client
+    }
+
+    #[tokio::test]
+    async fn test_scylla_get() -> Result<()> {
+        let client = get_client().await;
+
+        let id = "test_scylla_get";
+
+        // Create model
+        let model = Tst::with_id(id);
+        client.insert(&model).await?;
+
+        // Test
+        assert_eq!(model, client.get(Tst::find_by_id(id.into())).await?);
+
+        // Clear
+
+        client.delete(&model).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_scylla_get_optional() -> Result<()> {
+        let client = get_client().await;
+
+        let id = "test_scylla_maybe_get";
+
+        assert!(client
+            .get_optional(Tst::maybe_find_first_by_id(id.into()))
+            .await?
+            .is_none());
+
+        // Create model
+        let model = Tst::with_id(id);
+        client.insert(&model).await?;
+
+        assert!(client
+            .get_optional(Tst::maybe_find_first_by_id(id.into()))
+            .await?
+            .is_some());
+
+        // Clear
+        client.delete(&model).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_scylla_stream() -> Result<()> {
+        let client = get_client().await;
+        let fx_name = "test_scylla_stream";
+
+        let models = [
+            Tst::with_id("test_scylla_stream1").with_name(fx_name),
+            Tst::with_id("test_scylla_stream2").with_name(fx_name),
+            Tst::with_id("test_scylla_stream3").with_name(fx_name),
+            Tst::with_id("test_scylla_stream4").with_name(fx_name),
+            Tst::with_id("test_scylla_stream5").with_name(fx_name),
+            Tst::with_id("test_scylla_stream6").with_name(fx_name),
+        ];
+
+        // Create models
+        client.insert_many(&models, 6).await?;
+
+        // Test
+        let mut stream = client
+            .stream(Tst::find_by_name(fx_name.to_string()))
+            .await?;
+
+        let mut got = vec![];
+
+        while let Some(Ok(model)) = stream.next().await {
+            got.push(model);
+        }
+
+        assert_eq!(6, got.len());
+
+        got.sort();
+
+        assert_eq!(models[0], got[0]);
+        assert_eq!(models[1], got[1]);
+        assert_eq!(models[2], got[2]);
+        assert_eq!(models[3], got[3]);
+        assert_eq!(models[4], got[4]);
+        assert_eq!(models[5], got[5]);
+
+        // Clear
+        client.delete_many(&got, 6).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_scylla_insert() -> Result<()> {
+        let client = get_client().await;
+
+        let id = "test_scylla_insert";
+
+        // Create model
+        let model = Tst::with_id(id);
+        client.insert(&model).await?;
+
+        // Test
+        assert_eq!(model, client.get(Tst::find_by_id(id.into())).await?);
+
+        // Clear
+        client.delete(&model).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_scylla_insert_many() -> Result<()> {
+        let client = get_client().await;
+        let fx_name = "test_scylla_insert_many";
+
+        let models = [
+            Tst::with_id("test_scylla_insert_many1").with_name(fx_name),
+            Tst::with_id("test_scylla_insert_many2").with_name(fx_name),
+            Tst::with_id("test_scylla_insert_many3").with_name(fx_name),
+        ];
+
+        // Create models
+        client.insert_many(&models, 3).await?;
+
+        // Test
+        let mut find = client
+            .stream(Tst::find_by_name(fx_name.into()))
+            .await?
+            .try_collect()
+            .await?;
+        assert_eq!(3, find.len());
+
+        find.sort();
+
+        assert_eq!(models[0], find[0]);
+        assert_eq!(models[1], find[1]);
+        assert_eq!(models[2], find[2]);
+
+        // Clear
+        client.delete_many(&find, 3).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_scylla_update() -> Result<()> {
+        let client = get_client().await;
+
+        let id = "test_scylla_update";
+
+        // Create model
+        let model = Tst::with_id(id);
+        client.insert(&model).await?;
+
+        // Test
+        let updated = model.with_name("new name");
+        client.update(&updated).await?;
+
+        assert_eq!(updated, client.get(Tst::find_by_id(id.into())).await?);
+
+        // Clear
+        client.delete(&updated).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_scylla_update_many() -> Result<()> {
+        let client = get_client().await;
+        let fx_name = "name";
+        let fx_new_name = "new_name";
+
+        let models = [
+            Tst::with_id("test_scylla_update_many1").with_name(fx_name),
+            Tst::with_id("test_scylla_update_many2").with_name(fx_name),
+            Tst::with_id("test_scylla_update_many3").with_name(fx_name),
+        ];
+
+        // Create models
+        client.insert_many(&models, 3).await?;
+
+        let mut find = client
+            .stream(Tst::find_by_name(fx_name.into()))
+            .await?
+            .try_collect()
+            .await?;
+        assert_eq!(3, find.len());
+        find.sort();
+
+        assert_eq!(models[0], find[0]);
+        assert_eq!(models[1], find[1]);
+        assert_eq!(models[2], find[2]);
+
+        // Test
+        let mut updated = vec![];
+        for model in models {
+            let new_model = model.with_name(fx_new_name);
+            updated.push(new_model);
+        }
+
+        client.update_many(&updated, 3).await?;
+
+        let mut find = client
+            .stream(Tst::find_by_name(fx_new_name.into()))
+            .await?
+            .try_collect()
+            .await?;
+        assert_eq!(3, find.len());
+        find.sort();
+
+        assert_eq!(updated[0], find[0]);
+        assert_eq!(updated[1], find[1]);
+        assert_eq!(updated[2], find[2]);
+
+        // Clear
+        client.delete_many(&find, 3).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_scylla_delete() -> Result<()> {
+        let client = get_client().await;
+
+        let id = "test_scylla_delete";
+
+        // Create model
+        let model = Tst::with_id(id);
+        client.insert(&model).await?;
+
+        // Test
+        client.delete(&model).await?;
+
+        assert!(client.get(Tst::find_by_id(id.into())).await.is_err());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_scylla_delete_many() -> Result<()> {
+        let client = get_client().await;
+        let fx_name = "test_scylla_delete_many";
+
+        let models = [
+            Tst::with_id("test_scylla_delete_many1").with_name(fx_name),
+            Tst::with_id("test_scylla_delete_many2").with_name(fx_name),
+            Tst::with_id("test_scylla_delete_many3").with_name(fx_name),
+        ];
+
+        // Create models
+        client.insert_many(&models, 3).await?;
+
+        // Test
+        let count = client.count(Tst::find_by_name(fx_name.into())).await?;
+        assert_eq!(3, count);
+
+        client.delete_many(&models, 3).await?;
+
+        let count = client.count(Tst::find_by_name(fx_name.into())).await?;
+        assert_eq!(0, count);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_scylla_count() -> Result<()> {
+        let client = get_client().await;
+        let fx_name = "test_scylla_count";
+
+        let models = [
+            Tst::with_id("test_scylla_count1").with_name(fx_name),
+            Tst::with_id("test_scylla_count2").with_name(fx_name),
+            Tst::with_id("test_scylla_count3").with_name(fx_name),
+        ];
+
+        // Create models
+        client.insert_many(&models, 3).await?;
+
+        // Test
+        let count = client.count(Tst::find_by_name(fx_name.into())).await?;
+        assert_eq!(3, count);
+
+        // Clear
+        client.delete_many(&models, 3).await?;
+
+        let count = client.count(Tst::find_by_name(fx_name.into())).await?;
+        assert_eq!(0, count);
+
+        Ok(())
+    }
+}
+
+// endregion: --- Tests

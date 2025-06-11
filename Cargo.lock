@@ -743,7 +743,7 @@ checksum = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f"
 
 [[package]]
 name = "grapple_db"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -763,14 +763,11 @@ dependencies = [
 
 [[package]]
 name = "grapple_redis_macros"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef0322680bdf2b14222f435ee51a586a59beeaaeadc9d18666c24c5a6890a90e"
+checksum = "e5d3e41fc836ceedb070ad57ba08ec71bc676a9dab6d15473a584728b9f8a1c5"
 dependencies = [
- "deadpool-redis",
  "quote",
- "serde",
- "serde_json",
  "syn",
 ]
 

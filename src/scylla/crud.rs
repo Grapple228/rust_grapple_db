@@ -15,7 +15,7 @@
 //!
 //! ```rust,no_run
 //! use std::time::Duration;
-//! use scylla::statement::Consistency;
+//! use grapple_db::scylla::statement::Consistency;
 //! use grapple_db::scylla::CrudParams;
 //! use grapple_db::scylla::operations::Find;
 //! use grapple_db::scylla::operations::ModelBatch;
@@ -65,7 +65,7 @@ use std::time::Duration;
 ///
 /// ```rust,no_run
 /// use std::time::Duration;
-/// use scylla::statement::Consistency;
+/// use grapple_db::scylla::statement::Consistency;
 /// use grapple_db::scylla::CrudParams;
 /// use grapple_db::scylla::operations::Find;
 /// use grapple_db::scylla::operations::ModelBatch;

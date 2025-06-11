@@ -8,7 +8,7 @@
 //! # Overview
 //!
 //! The `RedisModelCollector` trait provides a method for converting a collection of models into
-//! a vector of tuples, where each tuple contains a key and a value as strings. This is essential
+//! a vector of tuples, where each tuple contains a key and a value as converted to `ToRedisArgs`. This is essential
 //! for preparing data to be stored in Redis efficiently.
 //!
 //! # Associated Types
@@ -20,14 +20,15 @@
 //! ## collect
 //!
 //! Converts the implementing type into a vector of tuples, where each tuple contains a key
-//! and a value as strings. This method is crucial for batch operations in Redis.
+//! and a value as converted to `ToRedisArgs`. This method is crucial for batch operations in Redis.
 //!
 //! # Example
 //!
 //! ```rust,no_run
+//! use grapple_db::redis;
+//! use grapple_db::redis::ToRedisArgs;
 //! use grapple_db::redis::RedisModel;
 //! use grapple_db::redis::RedisModelCollector;
-//! use grapple_db::redis::FromRedisValue;
 //! use grapple_db::redis::macros::FromRedisValue;
 //!
 //! #[derive(Debug, serde::Serialize, serde::Deserialize, FromRedisValue)]
@@ -37,8 +38,8 @@
 //! }
 //!
 //! impl RedisModel for MyModel {
-//!     fn key(&self) -> String {
-//!         self.key.clone()
+//!     fn key(&self) -> Result<String, redis::Error> {
+//!         Ok(self.key.clone())
 //!     }
 //! }
 //!
@@ -47,13 +48,15 @@
 //! }
 //!
 //! impl RedisModelCollector<MyModel> for MyModelCollector {
-//!     fn collect(&self) -> Vec<(String, String)> {
+//!     fn collect(&self) -> Vec<(Vec<Vec<u8>>, Vec<Vec<u8>>)> {
 //!         self.models.iter()
-//!             .map(|model| (model.key(), model.value().unwrap()))
+//!             .map(|model| (model.key().unwrap().to_redis_args(), model.value().unwrap().to_redis_args()))
 //!             .collect()
 //!     }
 //! }
 //! ```
+
+use deadpool_redis::redis::ToRedisArgs;
 
 use crate::redis::RedisModel;
 
@@ -72,14 +75,15 @@ use crate::redis::RedisModel;
 /// ## collect
 ///
 /// Converts the implementing type into a vector of tuples, where each tuple contains a key
-/// and a value as strings. This method is essential for preparing data to be stored in Redis.
+/// and a value as converted to `ToRedisArgs`. This method is crucial for batch operations in Redis.
 ///
 /// # Example
 ///
 /// ```rust,no_run
+/// use grapple_db::redis;
+/// use grapple_db::redis::ToRedisArgs;
 /// use grapple_db::redis::RedisModel;
 /// use grapple_db::redis::RedisModelCollector;
-/// use grapple_db::redis::FromRedisValue;
 /// use grapple_db::redis::macros::FromRedisValue;
 ///
 /// #[derive(Debug, serde::Serialize, serde::Deserialize, FromRedisValue)]
@@ -89,8 +93,8 @@ use crate::redis::RedisModel;
 /// }
 ///
 /// impl RedisModel for MyModel {
-///     fn key(&self) -> String {
-///         self.key.clone()
+///     fn key(&self) -> Result<String, redis::Error> {
+///         Ok(self.key.to_string())
 ///     }
 /// }
 ///
@@ -99,9 +103,9 @@ use crate::redis::RedisModel;
 /// }
 ///
 /// impl RedisModelCollector<MyModel> for MyModelCollector {
-///     fn collect(&self) -> Vec<(String, String)> {
+///     fn collect(&self) -> Vec<(Vec<Vec<u8>>, Vec<Vec<u8>>)> {
 ///         self.models.iter()
-///             .map(|model| (model.key(), model.value().unwrap()))
+///             .map(|model| (model.key().unwrap().to_redis_args(), model.value().unwrap().to_redis_args()))
 ///             .collect()
 ///     }
 /// }
@@ -110,7 +114,7 @@ pub trait RedisModelCollector<M>
 where
     M: RedisModel,
 {
-    fn collect(&self) -> Vec<(String, String)>;
+    fn collect(&self) -> Vec<(Vec<Vec<u8>>, Vec<Vec<u8>>)>;
 }
 
 impl<'a, I, M> RedisModelCollector<M> for I
@@ -118,15 +122,12 @@ where
     M: RedisModel + 'a,
     I: AsRef<[&'a M]>,
 {
-    fn collect(&self) -> Vec<(String, String)> {
+    fn collect(&self) -> Vec<(Vec<Vec<u8>>, Vec<Vec<u8>>)> {
         self.as_ref()
             .iter()
-            .filter_map(|m| {
-                if let Ok(value) = m.value() {
-                    Some((m.key().clone(), value.clone()))
-                } else {
-                    None
-                }
+            .filter_map(|m| match (m.key(), m.value()) {
+                (Ok(key), Ok(value)) => Some((key.to_redis_args(), value.to_redis_args())),
+                _ => None,
             })
             .collect()
     }

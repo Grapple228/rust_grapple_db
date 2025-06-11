@@ -1,13 +1,16 @@
 // region:    --- Modules
 
 #[cfg(feature = "scylla")]
-use grapple_db::scylla::charybdis::{
-    macros::charybdis_model,
-    types::{Text, Uuid},
-};
-#[cfg(feature = "scylla")]
 use grapple_db::{
-    scylla::{stream::PagableCharybdisStream, Client, ConnectionParams, CrudParams},
+    scylla::{
+        charybdis::{
+            self,
+            macros::charybdis_model,
+            types::{Text, Uuid},
+        },
+        stream::PagableCharybdisStream,
+        Client, ConnectionParams, CrudParams,
+    },
     Pagable,
 };
 

@@ -1,7 +1,5 @@
 #[cfg(feature = "redis")]
-use grapple_db::redis::macros::FromRedisValue;
-#[cfg(feature = "redis")]
-use grapple_db::redis::{AsyncCommands, Client, RedisModel};
+use grapple_db::redis::{self, macros::FromRedisValue, Client, RedisModel};
 #[cfg(feature = "redis")]
 use serde::{Deserialize, Serialize};
 
@@ -19,9 +17,9 @@ pub struct Model {
 
 #[cfg(feature = "redis")]
 impl RedisModel for Model {
-    fn key(&self) -> String {
+    fn key(&self) -> redis::Result<String> {
         // Key for model
-        format!("{}.{}", self.a, self.b)
+        Ok(format!("{}.{}", self.a, self.b))
     }
 }
 
@@ -47,10 +45,8 @@ async fn main() -> Result<()> {
     let model2 = Model::new(2);
 
     // -- Get keys
-    let key1 = model1.key();
-    let key2 = model2.key();
-
-    // -- Set many
+    let key1 = model1.key()?;
+    let key2 = model2.key()?;
 
     // -- Set models
     assert_eq!("OK", client.mset(&[&model1, &model2]).await?);
@@ -77,8 +73,7 @@ async fn main() -> Result<()> {
     // -- Del model
     println!("Del models");
 
-    assert_eq!(1, client.del(&key1).await?);
-    assert_eq!(1, client.del(&key2).await?);
+    assert_eq!(2, client.mdel([&key1, &key2]).await?);
 
     println!();
 
@@ -94,23 +89,6 @@ async fn main() -> Result<()> {
 
     let get2: Option<Model> = client.get(&key2).await?;
     println!("Model 2: {:?}", get2);
-
-    println!();
-
-    // You still can use methods that not covered by Client
-    client
-        .connection()
-        .await?
-        .client_setname::<_, String>("my_client_name".to_string())
-        .await?;
-    println!(
-        "client getname: {}",
-        client
-            .connection()
-            .await?
-            .client_getname::<String>()
-            .await?
-    );
 
     Ok(())
 }

@@ -1,5 +1,16 @@
 # Changelog for grapple_db
 
+## [0.3.0] - 11 June 2025
+
+This release improves using of `redis` feature. There are some breaking changes
+
+- Updates to `grapple_redis_macros` to version 0.2.0.
+- Adds `batch` methods to Redis client for `mget`, `mset`, and `mdel` operations.
+- Improves documentation and examples.
+- Includes `futures` dependency for Redis feature.
+- Added tests for `scylla` client
+- Added tests for `redis` client
+
 ## [0.2.1] - 08 June 2025
 
 ### Fixes
