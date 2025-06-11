@@ -62,7 +62,7 @@ scylla = "1.2.0" # for scylla feature
 
 ## Redis examples
 
-Full code example for tuples can be found in [`/examples/redis_tuple.rs`](/examples/redis_tuple.rs)
+Full code example for tuples can be found in [`/examples/redis_tuple.rs`](/examples/redis_tuple.rs)  
 Full code example for models can be found in [`/examples/redis_model.rs`](/examples/redis_model.rs)
 
 ### Create Client
