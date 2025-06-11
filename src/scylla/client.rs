@@ -17,6 +17,7 @@ use super::{ConnectionParams, CrudParams};
 use charybdis::query::OptionalModelRow;
 use charybdis::scylla::response::query_result::QueryResult;
 use charybdis::scylla::serialize::row::SerializeRow;
+use futures::future::join_all;
 use futures::StreamExt;
 use tracing::debug;
 
@@ -404,6 +405,90 @@ impl Client {
             .await?;
 
         Ok(res)
+    }
+
+    /// Retrieves multiple entities from the database based on the provided queries.
+    ///
+    /// Use this method when you need to retrieve entities by their IDs; this method is significantly faster
+    /// than executing multiple `get` calls individually.
+    ///
+    /// This method executes a series of asynchronous queries to fetch entities
+    /// from the database. It collects the results and returns only the successful
+    /// entities, filtering out any errors that may have occurred during the
+    /// retrieval process.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `Val` - The type used for serializing the query parameters.
+    /// * `E` - The entity/model type being retrieved.
+    ///
+    /// # Arguments
+    ///
+    /// * `queries` - A vector of `CharybdisQuery` instances representing the queries
+    ///   to execute for fetching entities.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a vector of successfully retrieved entities or an error
+    /// if the operation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use grapple_db::scylla::Client;
+    /// use grapple_db::scylla::types::Uuid;
+    ///
+    /// // Assuming you have a `User` model defined with `Charybdis`
+    /// # #[grapple_db::scylla::macros::charybdis_model(
+    /// #       table_name = users,
+    /// #       partition_keys = [id],
+    /// #       clustering_keys = [],
+    /// #   )]
+    /// # #[derive(Debug, Clone, Default)]
+    /// # struct User {
+    /// #     id: Uuid,
+    /// # }
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let client = Client::default().await?;
+    ///     
+    ///     let ids = vec![Uuid::from_u128(1), Uuid::from_u128(2)];
+    ///     let queries = ids.iter().map(|id| User::find_by_id(*id)).collect();
+    ///     
+    ///     let users: Vec<User> = client.get_many(queries).await?;
+    ///     
+    ///     Ok(())
+    /// }
+    /// ```
+    pub async fn get_many<'a, Val, E>(
+        &self,
+        queries: Vec<CharybdisQuery<'a, Val, E, ModelRow>>,
+    ) -> Result<Vec<E>>
+    where
+        Val: SerializeRow + Sync + Send,
+        E: Model + Sync + Send + Clone,
+    {
+        let mut futures = vec![];
+
+        for query in queries {
+            let future = self.get::<Val, E>(query);
+            futures.push(future);
+        }
+
+        // Wait to all operations complete
+        let results = join_all(futures).await;
+
+        // Get success operations
+        let result: Vec<E> = results
+            .iter()
+            .filter_map(|result| match result {
+                Ok(entity) => Some(entity.clone()),
+                _ => None,
+            })
+            .collect();
+
+        Ok(result)
     }
 
     /// Counts the total number of entities that match the given query
@@ -1714,6 +1799,43 @@ mod tests {
 
         // Clear
         client.delete(&model).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_scylla_get_many() -> Result<()> {
+        let client = get_client().await;
+        let fx_name = "test_scylla_get_many";
+
+        let ids = vec![
+            "test_scylla_get_many1",
+            "test_scylla_get_many2",
+            "test_scylla_get_many3",
+        ];
+
+        let models = ids
+            .iter()
+            .map(|id| Tst::with_id(id).with_name(fx_name))
+            .collect::<Vec<Tst>>();
+
+        // Create models
+        client.insert_many(&models, 3).await?;
+
+        // Test
+        let queries = ids
+            .iter()
+            .map(|id| Tst::find_by_id(id.to_string()))
+            .collect::<Vec<_>>();
+        let mut got = client.get_many(queries).await?;
+        got.sort();
+
+        assert_eq!(models[0], got[0]);
+        assert_eq!(models[1], got[1]);
+        assert_eq!(models[2], got[2]);
+
+        // Clear
+        client.delete_many(&got, 3).await?;
 
         Ok(())
     }

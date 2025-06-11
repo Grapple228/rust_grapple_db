@@ -1,5 +1,13 @@
 # Changelog for grapple_db
 
+## [0.3.1] - 11 June 2025
+
+This version introduces several improvements:
+
+- Fixes tests and documentation issues.
+- Adds a `get_many` method to the Scylla client for retrieving multiple entities efficiently.
+- Modifies the `del` method in the Redis client to return a boolean indicating successful deletion.
+
 ## [0.3.0] - 11 June 2025
 
 This release improves using of `redis` feature. There are some breaking changes

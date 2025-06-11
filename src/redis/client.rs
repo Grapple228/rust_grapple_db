@@ -735,7 +735,7 @@ impl Client {
     /// Asynchronously deletes a key from Redis.
     ///
     /// This method removes the specified key from Redis. If the key exists and is successfully deleted, it returns
-    /// the number of keys that were removed (which will be 1). If the key does not exist, it returns 0.
+    /// the `true`, if the key does not exist, it returns `false`.
     ///
     /// # Arguments
     ///
@@ -743,8 +743,8 @@ impl Client {
     ///
     /// # Returns
     ///
-    /// A `Result` containing a `usize`, which indicates the number of keys that were removed. This will be 1 if
-    /// the key was successfully deleted, or 0 if the key did not exist.
+    /// A `Result` containing a `bool`, which indicates if the entity was removed. This will be `true` if
+    /// the key was successfully deleted, or `false` if the key did not exist.
     ///
     /// # Examples
     ///
@@ -756,12 +756,12 @@ impl Client {
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
     ///
-    ///     let deleted_count: usize = client.del("my_key").await?;
+    ///     let result: bool = client.del("my_key").await?;
     ///
     ///     Ok(())
     /// }
     /// ```
-    pub async fn del(&self, key: impl AsRef<str>) -> Result<usize> {
+    pub async fn del(&self, key: impl AsRef<str>) -> Result<bool> {
         let mut connection = self.connection().await?;
         Ok(connection.del(key.as_ref()).await?)
     }
@@ -807,11 +807,14 @@ impl Client {
             futures.push(self.del(key));
         }
 
-        // Ожидаем завершения всех операций удаления
+        // Wait to all operations complete
         let results = join_all(futures).await;
 
-        // Возвращаем количество успешно удаленных ключей
-        Ok(results.iter().filter(|result| result.is_ok()).count())
+        // Return count of successfull operations, that returned true
+        Ok(results
+            .iter()
+            .filter(|result| matches!(result, Ok(true)))
+            .count())
     }
 }
 
@@ -829,7 +832,6 @@ impl Client {
     /// # Returns
     ///
     /// A `Vec<String>` containing the keys converted to `String` format.
-    /// ```
     #[inline]
     fn map_keys<K, T>(keys: K) -> Vec<String>
     where
@@ -842,7 +844,7 @@ impl Client {
     /// Asynchronously checks if a key exists in Redis.
     ///
     /// This method checks whether the specified key is present in Redis. If the key exists, it returns `true`;
-    /// otherwise, it returns `false`. The type `K` must implement `ToRedisArgs` and be both `Send` and `Sync`.
+    /// otherwise, it returns `false`.
     ///
     /// # Arguments
     ///
@@ -903,8 +905,7 @@ impl Client {
     /// Asynchronously renames a key in Redis.
     ///
     /// This method renames the specified key to a new key. If the operation is successful, it returns a confirmation
-    /// message. If the new key already exists, it will be overwritten. The types `K` and `N` must implement
-    /// `ToRedisArgs` and be both `Send` and `Sync`.
+    /// message. If the new key already exists, it will be overwritten.
     ///
     /// # Arguments
     ///
@@ -938,8 +939,7 @@ impl Client {
     ///
     /// This method attempts to rename the specified key to a new key name, but only if the new key does not already
     /// exist in Redis. If the operation is successful and the new key was created, it returns `true`. If the new
-    /// key already exists, it does not perform the rename and returns `false`. The types `K` and `N` must implement
-    /// `ToRedisArgs` and be both `Send` and `Sync`.
+    /// key already exists, it does not perform the rename and returns `false`.
     ///
     /// # Arguments
     ///
@@ -1273,9 +1273,11 @@ mod tests {
         // Test
         assert_eq!(Some(fx_model), client.get(key).await?);
 
-        assert_eq!(1, client.del(key).await?);
+        assert!(client.del(key).await?);
 
         assert_eq!(None::<Tst>, client.get(key).await?);
+
+        assert!(!client.del(key).await?);
 
         Ok(())
     }
@@ -1297,10 +1299,14 @@ mod tests {
         assert_eq!(Some(model2), client.get(key2).await?);
 
         // Test
-        client.mdel(&[key1, key2]).await?;
+        assert_eq!(2, client.mdel(&[key1, key2]).await?);
+
+        println!("{:?}", client.get::<String>(key1).await?);
 
         assert_eq!(None::<Tst>, client.get(key1).await?);
         assert_eq!(None::<Tst>, client.get(key2).await?);
+
+        assert_eq!(0, client.mdel(&[key1, key2]).await?);
 
         Ok(())
     }
