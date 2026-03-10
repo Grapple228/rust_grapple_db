@@ -19,7 +19,7 @@ async fn main() -> Result<()> {
 
     client.set(&("3213".to_string(), 3)).await?;
 
-    println!("{:?}", client.get::<i32>("3213").await?);
+    println!("{:?}", client.get::<i32, _>("3213").await?);
 
     // -- Set tuples
     assert_eq!("OK", client.mset(&[&tuple1, &tuple2]).await?);
@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
     // -- Read tuples
     println!("Get tuples");
 
-    let got_values: Vec<Option<String>> = client.mget([&key1, &key2]).await?;
+    let got_values: Vec<Option<String>> = client.mget(&[&key1, &key2]).await?;
     println!("Multiple {:?}", got_values);
 
     let get1: String = client.get(&key1).await?.unwrap();

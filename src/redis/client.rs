@@ -45,7 +45,7 @@
 use super::Result;
 use crate::redis::{RedisModel, RedisModelCollector};
 use deadpool_redis::{
-    redis::{AsyncCommands, Expiry, FromRedisValue},
+    redis::{AsyncCommands, Expiry, FromRedisValue, ToRedisArgs},
     Config, Connection, Pool,
 };
 use futures::future::join_all;
@@ -215,12 +215,13 @@ impl Client {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn get<V>(&self, key: impl AsRef<str>) -> Result<Option<V>>
+    pub async fn get<V, K>(&self, key: K) -> Result<Option<V>>
     where
         V: FromRedisValue,
+        K: for<'a> ToRedisArgs + Send + Sync,
     {
         let mut connection = self.connection().await?;
-        Ok(connection.get(key.as_ref()).await?)
+        Ok(connection.get(key).await?)
     }
 
     /// Asynchronously retrieves multiple values from Redis using the provided keys.
@@ -269,14 +270,14 @@ impl Client {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn mget<'a, K, T, V>(&self, keys: K) -> Result<Vec<Option<V>>>
+    pub async fn mget<K, T, V>(&self, keys: K) -> Result<Vec<Option<V>>>
     where
         V: FromRedisValue,
-        K: IntoIterator<Item = T>,
-        T: AsRef<str>,
+        K: IntoIterator<Item = T> + ToRedisArgs + Send + Sync,
+        T: for<'a> ToRedisArgs + Send + Sync,
     {
         let mut connection = self.connection().await?;
-        Ok(connection.mget(Self::map_keys(keys)).await?)
+        Ok(connection.mget(keys).await?)
     }
 
     /// Asynchronously retrieves a value from Redis using the provided key and sets an expiration time.
@@ -327,12 +328,13 @@ impl Client {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn get_ex<V>(&self, key: impl AsRef<str>, expire_at: Expiry) -> Result<Option<V>>
+    pub async fn get_ex<V, K>(&self, key: K, expire_at: Expiry) -> Result<Option<V>>
     where
         V: FromRedisValue,
+        K: for<'a> ToRedisArgs + Send + Sync,
     {
         let mut connection = self.connection().await?;
-        Ok(connection.get_ex(key.as_ref(), expire_at).await?)
+        Ok(connection.get_ex(key, expire_at).await?)
     }
 
     /// Asynchronously retrieves a value from Redis using the provided key and deletes the key.
@@ -379,12 +381,13 @@ impl Client {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn get_del<V>(&self, key: impl AsRef<str>) -> Result<Option<V>>
+    pub async fn get_del<V, K>(&self, key: K) -> Result<Option<V>>
     where
         V: FromRedisValue,
+        K: for<'a> ToRedisArgs + Send + Sync,
     {
         let mut connection = self.connection().await?;
-        Ok(connection.get_del(key.as_ref()).await?)
+        Ok(connection.get_del(key).await?)
     }
 
     /// Asynchronously retrieves a value from Redis using the key from the provided model and sets a new value.
@@ -418,9 +421,12 @@ impl Client {
     /// # }
     /// #
     /// # impl RedisModel for MyModel {
-    /// #     fn key(&self) -> Result<String, redis::Error> {
+    /// #     type Key = String;
+    /// #
+    /// #     fn key(&self) -> Result<Self::Key, redis::Error> {
     /// #         Ok(self.a.to_string())
     /// #     }
+    /// #
     /// #     fn value(&self) -> Result<String, redis::Error> {
     /// #         Ok((self.a + 1).to_string()) // Example of a new value
     /// #     }
@@ -484,7 +490,9 @@ impl Client {
     /// # }
     /// #
     /// # impl RedisModel for MyModel {
-    /// #     fn key(&self) -> Result<String, redis::Error> {
+    /// #     type Key = String;
+    /// #
+    /// #     fn key(&self) -> Result<Self::Key, redis::Error> {
     /// #         Ok(self.a.to_string())
     /// #     }
     /// # }
@@ -538,7 +546,9 @@ impl Client {
     /// # }
     /// #
     /// # impl RedisModel for MyModel {
-    /// #     fn key(&self) -> Result<String, redis::Error> {
+    /// #     type Key = String;
+    /// #
+    /// #     fn key(&self) -> Result<Self::Key, redis::Error> {
     /// #         Ok(self.a.to_string())
     /// #     }
     /// # }
@@ -594,7 +604,9 @@ impl Client {
     /// # }
     /// #
     /// # impl RedisModel for MyModel {
-    /// #     fn key(&self) -> Result<String, redis::Error> {
+    /// #     type Key = String;
+    /// #
+    /// #     fn key(&self) -> Result<Self::Key, redis::Error> {
     /// #         Ok(self.a.to_string())
     /// #     }
     /// # }
@@ -649,7 +661,9 @@ impl Client {
     /// # }
     /// #
     /// # impl RedisModel for MyModel {
-    /// #     fn key(&self) -> Result<String, redis::Error> {
+    /// #     type Key = String;
+    /// #
+    /// #     fn key(&self) -> Result<Self::Key, redis::Error> {
     /// #         Ok(self.a.to_string())
     /// #     }
     /// # }
@@ -704,7 +718,9 @@ impl Client {
     /// # }
     /// #
     /// # impl RedisModel for MyModel {
-    /// #     fn key(&self) -> Result<String, redis::Error> {
+    /// #     type Key = String;
+    /// #
+    /// #     fn key(&self) -> Result<Self::Key, redis::Error> {
     /// #         Ok(self.a.to_string())
     /// #     }
     /// # }
@@ -761,9 +777,12 @@ impl Client {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn del(&self, key: impl AsRef<str>) -> Result<bool> {
+    pub async fn del<K>(&self, key: K) -> Result<bool>
+    where
+        K: for<'a> ToRedisArgs + Send + Sync,
+    {
         let mut connection = self.connection().await?;
-        Ok(connection.del(key.as_ref()).await?)
+        Ok(connection.del(key).await?)
     }
 
     /// Asynchronously deletes multiple keys from Redis.
@@ -796,14 +815,14 @@ impl Client {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn mdel<'a, K, T>(&self, keys: K) -> Result<usize>
+    pub async fn mdel<K, T>(&self, keys: K) -> Result<usize>
     where
         K: IntoIterator<Item = T>,
-        T: AsRef<str>,
+        T: for<'a> ToRedisArgs + Send + Sync,
     {
         let mut futures = vec![];
 
-        for key in Self::map_keys(keys) {
+        for key in keys {
             futures.push(self.del(key));
         }
 
@@ -820,27 +839,6 @@ impl Client {
 
 // Other
 impl Client {
-    /// Converts an iterable collection of keys into a vector of strings.
-    ///
-    /// This function takes an iterable collection of keys and maps each key to a `String`. It is useful for ensuring
-    /// that the keys are in the correct format for further processing, such as deletion from Redis.
-    ///
-    /// # Arguments
-    ///
-    /// * `keys` - An iterable collection of keys, where each key can be referenced as a string.
-    ///
-    /// # Returns
-    ///
-    /// A `Vec<String>` containing the keys converted to `String` format.
-    #[inline]
-    fn map_keys<K, T>(keys: K) -> Vec<String>
-    where
-        K: IntoIterator<Item = T>,
-        T: AsRef<str>,
-    {
-        keys.into_iter().map(|k| k.as_ref().to_string()).collect()
-    }
-
     /// Asynchronously checks if a key exists in Redis.
     ///
     /// This method checks whether the specified key is present in Redis. If the key exists, it returns `true`;
@@ -869,9 +867,12 @@ impl Client {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn exists(&self, key: impl AsRef<str>) -> Result<bool> {
+    pub async fn exists<K>(&self, key: K) -> Result<bool>
+    where
+        K: for<'a> ToRedisArgs + Send + Sync,
+    {
         let mut connection = self.connection().await?;
-        Ok(connection.exists(key.as_ref()).await?)
+        Ok(connection.exists(key).await?)
     }
 
     /// Asynchronously sends a ping command to Redis to check the connection.
@@ -930,9 +931,13 @@ impl Client {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn rename(&self, key: impl AsRef<str>, new_key: impl AsRef<str>) -> Result<String> {
+    pub async fn rename<K1, K2>(&self, key: K1, new_key: K2) -> Result<String>
+    where
+        K1: for<'a> ToRedisArgs + Send + Sync,
+        K2: for<'a> ToRedisArgs + Send + Sync,
+    {
         let mut connection = self.connection().await?;
-        Ok(connection.rename(key.as_ref(), new_key.as_ref()).await?)
+        Ok(connection.rename(key, new_key).await?)
     }
 
     /// Asynchronously renames a key in Redis only if the new key does not already exist.
@@ -965,9 +970,13 @@ impl Client {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn rename_nx(&self, key: impl AsRef<str>, new_key: impl AsRef<str>) -> Result<bool> {
+    pub async fn rename_nx<K1, K2>(&self, key: K1, new_key: K2) -> Result<bool>
+    where
+        K1: for<'a> ToRedisArgs + Send + Sync,
+        K2: for<'a> ToRedisArgs + Send + Sync,
+    {
         let mut connection = self.connection().await?;
-        Ok(connection.rename_nx(key.as_ref(), new_key.as_ref()).await?)
+        Ok(connection.rename_nx(key, new_key).await?)
     }
 }
 
@@ -996,7 +1005,9 @@ mod tests {
     }
 
     impl RedisModel for Tst {
-        fn key(&self) -> redis::Result<String> {
+        type Key = String;
+
+        fn key(&self) -> redis::Result<Self::Key> {
             Ok(self.key.clone())
         }
     }
@@ -1301,7 +1312,7 @@ mod tests {
         // Test
         assert_eq!(2, client.mdel(&[key1, key2]).await?);
 
-        println!("{:?}", client.get::<String>(key1).await?);
+        println!("{:?}", client.get::<String, _>(key1).await?);
 
         assert_eq!(None::<Tst>, client.get(key1).await?);
         assert_eq!(None::<Tst>, client.get(key2).await?);
@@ -1360,7 +1371,8 @@ mod tests {
 
         assert_eq!("OK", client.rename(key, new_key).await?);
 
-        assert_eq!(None, client.get::<Tst>(key).await?);
+        let res: Option<Tst> = client.get(key).await?;
+        assert_eq!(None, res);
         assert_eq!(Some(fx_key_new_model), client.get(new_key).await?);
 
         // Clear
@@ -1383,7 +1395,8 @@ mod tests {
         // Test
         assert!(client.rename_nx(key, new_key).await?);
 
-        assert_eq!(None, client.get::<Tst>(key).await?);
+        let res: Option<Tst> = client.get(key).await?;
+        assert_eq!(None, res);
         assert_eq!(Some(fx_key_model.clone()), client.get(new_key).await?);
 
         let fx_key_new_model = Tst::default(key);
@@ -1391,7 +1404,8 @@ mod tests {
 
         assert!(!client.rename_nx(new_key, key).await?);
 
-        assert_eq!(Some(fx_key_model), client.get::<Tst>(key).await?);
+        let res: Option<Tst> = client.get(key).await?;
+        assert_eq!(Some(fx_key_model), res);
         assert_eq!(Some(fx_key_new_model), client.get(new_key).await?);
 
         // Clear

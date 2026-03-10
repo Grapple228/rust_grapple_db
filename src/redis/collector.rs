@@ -38,7 +38,9 @@
 //! }
 //!
 //! impl RedisModel for MyModel {
-//!     fn key(&self) -> Result<String, redis::Error> {
+//!     type Key = String;
+//!
+//!     fn key(&self) -> Result<Self::Key, redis::Error> {
 //!         Ok(self.key.clone())
 //!     }
 //! }
@@ -93,7 +95,9 @@ use crate::redis::RedisModel;
 /// }
 ///
 /// impl RedisModel for MyModel {
-///     fn key(&self) -> Result<String, redis::Error> {
+///     type Key = String;
+///
+///     fn key(&self) -> Result<Self::Key, redis::Error> {
 ///         Ok(self.key.to_string())
 ///     }
 /// }

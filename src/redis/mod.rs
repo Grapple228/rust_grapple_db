@@ -67,7 +67,9 @@ use serde::{de::DeserializeOwned, Serialize};
 /// }
 ///
 /// impl RedisModel for MyModel {
-///     fn key(&self) -> Result<String> {
+///     type Key = String;
+///
+///     fn key(&self) -> Result<Self::Key> {
 ///         Ok(self.id.to_string())
 ///     }
 /// }
@@ -77,7 +79,9 @@ use serde::{de::DeserializeOwned, Serialize};
 /// }
 /// ```
 pub trait RedisModel: FromRedisValue + Serialize + DeserializeOwned {
-    fn key(&self) -> Result<String>;
+    type Key: ToRedisArgs + Send + Sync;
+
+    fn key(&self) -> Result<Self::Key>;
     #[inline]
     fn value(&self) -> Result<impl ToRedisArgs + Send + Sync> {
         Ok(serde_json::to_string(&self)?)
@@ -88,8 +92,10 @@ impl<V> RedisModel for (String, V)
 where
     V: Serialize + DeserializeOwned + FromRedisValue + Clone,
 {
+    type Key = String;
+
     #[inline]
-    fn key(&self) -> Result<String> {
+    fn key(&self) -> Result<Self::Key> {
         Ok(self.0.clone())
     }
 
