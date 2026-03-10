@@ -110,7 +110,9 @@ pub struct Model {
 
 // Implement trait
 impl RedisModel for Model {
-    fn key(&self) -> redis::Result<String> {
+    type Key = String;
+    
+    fn key(&self) -> redis::Result<Self::Key> {
         // Key for model
         Ok(format!("{}.{}", self.a, self.b))
     }
