@@ -1,5 +1,16 @@
 # Changelog for grapple_db
 
+## [0.4.1] - 11 March 2026
+
+This version introduces several improvements:
+
+- Replace AsRef<str> with ToRedisArgs for all key parameters
+- Add associated type Key to RedisModel trait
+- Remove allocation overhead in batch operations
+- Support binary keys (Code, State, Nonce) out of the box
+- Update examples and tests
+- Make redis default feature"
+
 ## [0.3.1] - 11 June 2025
 
 This version introduces several improvements:
