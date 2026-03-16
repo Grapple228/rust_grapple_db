@@ -16,7 +16,7 @@ unsafe_code = "forbid"
 all-features = true
 
 [features]
-default = ["redis", "scylla"]
+default = []
 scylla = ["dep:scylla", "dep:charybdis", "dep:futures"]
 redis = ["dep:deadpool-redis", "dep:grapple_redis_macros", "dep:serde_json", "dep:futures"]
 

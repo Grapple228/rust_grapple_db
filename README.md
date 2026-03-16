@@ -98,23 +98,23 @@ Custom model
 
 ```rust
 // Imports
-use grapple_db::redis; // If have original redis-rs, then it not needed
-use grapple_db::redis::{macros::FromRedisValue, RedisModel};
+use grapple_db::redis::Client;
+use grapple_redis_macros::FromRedisValue;
+use serde::{Deserialize, Serialize};
 
 // Define struct
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize, FromRedisValue)]
+#[derive(Debug, Serialize, Deserialize, FromRedisValue, PartialEq)]
 pub struct Model {
     a: i32,
     b: i32,
 }
 
-// Implement trait
-impl RedisModel for Model {
-    type Key = String;
-    
-    fn key(&self) -> redis::Result<Self::Key> {
-        // Key for model
-        Ok(format!("{}.{}", self.a, self.b))
+impl Model {
+    pub fn new(value: i32) -> Self {
+        Self {
+            a: 2 * value,
+            b: 3 * value,
+        }
     }
 }
 ```
@@ -130,8 +130,11 @@ let value: Option<i32> = client.get(&key).await?;
 Model
 
 ```rust
-let key = model.key()?;
-let value: Option<Model> = client.get(&key).await?;
+// Read as raw JSON string
+let json: String = client.get(&key).await?.unwrap();
+
+// Deserialize manually
+let model: Model = serde_json::from_str(&json)?;
 ```
 
 ### Set
@@ -146,8 +149,12 @@ client.set(&tuple).await?;
 Custom Model
 
 ```rust
-let model = Model::default();
-client.set(&model).await?;
+// Create tuple (key, value) for writing
+let key = "model:1".to_string();
+let tuple = (key.clone(), serde_json::to_string(&model)?);
+
+// Set model via tuple
+client.set(&tuple).await?;
 ```
 
 ### Del
@@ -167,13 +174,20 @@ client.mdel(&keys).await?;
 Set batch
 
 ```rust
-client.mset(&models).await?;
+let tuple1 = (key1.clone(), serde_json::to_string(&model1)?);
+let tuple2 = (key2.clone(), serde_json::to_string(&model2)?);
+
+client.mset([&tuple1, &tuple2]).await?;
 ```
 
 Get batch
 
 ```rust
-client.mget(&keys).await?;
+let jsons: Vec<Option<String>> = client.mget(&[&key1, &key2]).await?;
+
+// Deserialize manually
+let model1: Model = serde_json::from_str(&jsons[0].as_ref().unwrap())?;
+let model2: Model = serde_json::from_str(&jsons[1].as_ref().unwrap())?;
 ```
 
 ### Other

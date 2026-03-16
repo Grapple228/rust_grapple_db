@@ -1,8 +1,10 @@
+#[cfg(feature = "redis")]
 use grapple_db::redis;
+#[cfg(feature = "redis")]
 use grapple_db::redis::Client;
+#[cfg(feature = "redis")]
 use grapple_redis_macros::FromRedisValue;
 
-#[cfg(feature = "redis")]
 #[cfg(feature = "redis")]
 use serde::{Deserialize, Serialize};
 
