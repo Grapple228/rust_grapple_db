@@ -43,9 +43,9 @@
 //! ```
 
 use super::Result;
-use crate::redis::{RedisModel, RedisModelCollector};
+use crate::redis::{collector::AsRedisPairs, RedisModel, RedisRead};
 use deadpool_redis::{
-    redis::{AsyncCommands, Expiry, FromRedisValue, ToRedisArgs},
+    redis::{AsyncCommands, Expiry, ToRedisArgs},
     Config, Connection, Pool,
 };
 use futures::future::join_all;
@@ -217,7 +217,7 @@ impl Client {
     /// ```
     pub async fn get<V, K>(&self, key: K) -> Result<Option<V>>
     where
-        V: FromRedisValue,
+        V: RedisRead,
         K: for<'a> ToRedisArgs + Send + Sync,
     {
         let mut connection = self.connection().await?;
@@ -272,7 +272,7 @@ impl Client {
     /// ```
     pub async fn mget<K, T, V>(&self, keys: K) -> Result<Vec<Option<V>>>
     where
-        V: FromRedisValue,
+        V: RedisRead,
         K: IntoIterator<Item = T> + ToRedisArgs + Send + Sync,
         T: for<'a> ToRedisArgs + Send + Sync,
     {
@@ -330,7 +330,7 @@ impl Client {
     /// ```
     pub async fn get_ex<V, K>(&self, key: K, expire_at: Expiry) -> Result<Option<V>>
     where
-        V: FromRedisValue,
+        V: RedisRead,
         K: for<'a> ToRedisArgs + Send + Sync,
     {
         let mut connection = self.connection().await?;
@@ -383,75 +383,62 @@ impl Client {
     /// ```
     pub async fn get_del<V, K>(&self, key: K) -> Result<Option<V>>
     where
-        V: FromRedisValue,
+        V: RedisRead,
         K: for<'a> ToRedisArgs + Send + Sync,
     {
         let mut connection = self.connection().await?;
         Ok(connection.get_del(key).await?)
     }
 
-    /// Asynchronously retrieves a value from Redis using the key from the provided model and sets a new value.
-    ///
-    /// This method fetches the value associated with the key derived from the provided model and replaces it with a new value
-    /// obtained from the model. If the key exists, it returns the old value deserialized into the type `V`. The type `V` must
-    /// implement the `FromRedisValue` trait. The type `M` must implement the `RedisModel` trait.
-    ///
-    /// # Arguments
-    ///
-    /// * `model` - A reference to a model that contains the key and the new value to be set in Redis.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing an `Option<V>`, where `Some(value)` is the deserialized old value if the key exists,
-    /// or `None` if the key does not exist.
-    ///
     /// # Examples
     ///
     /// ```rust,no_run
+    /// use grapple_db::redis;
     /// use grapple_db::redis::Client;
-    /// # use grapple_db::redis;
-    /// # use grapple_db::redis::macros::FromRedisValue;
-    /// # use grapple_db::redis::RedisModel;
-    /// # use serde::{Serialize, Deserialize};
+    /// use grapple_db::redis::RedisModel;
+    /// use grapple_db::redis::macros::FromRedisValue;
+    /// use serde::{Serialize, Deserialize};
     ///
-    /// // Assuming you have a model defined with trait `RedisModel` implemented
-    /// # #[derive(Debug,Serialize, Deserialize, FromRedisValue)]
-    /// # struct MyModel {
-    /// #     a: u64,
-    /// # }
-    /// #
-    /// # impl RedisModel for MyModel {
-    /// #     type Key = String;
-    /// #
-    /// #     fn key(&self) -> Result<Self::Key, redis::Error> {
-    /// #         Ok(self.a.to_string())
-    /// #     }
-    /// #
-    /// #     fn value(&self) -> Result<String, redis::Error> {
-    /// #         Ok((self.a + 1).to_string()) // Example of a new value
-    /// #     }
-    /// # }
+    /// #[derive(Debug, Serialize, Deserialize, FromRedisValue)]
+    /// struct MyModel {
+    ///     a: u64,
+    /// }
+    ///
+    /// impl RedisModel for MyModel {
+    ///     type Key = String;
+    ///     type Value = String;
+    ///
+    ///     fn key(&self) -> grapple_db::redis::Result<Self::Key> {
+    ///         Ok(self.a.to_string())
+    ///     }
+    ///
+    ///     fn key_ref(&self) -> &Self::Key {
+    ///         static PLACEHOLDER: String = String::new();
+    ///         &PLACEHOLDER
+    ///     }
+    ///
+    ///     fn value(&self) -> grapple_db::redis::Result<impl deadpool_redis::redis::ToRedisArgs + Send + Sync> {
+    ///         Ok(serde_json::to_string(&self)?)
+    ///     }
+    ///
+    ///     fn value_ref(&self) -> &Self::Value {
+    ///         static PLACEHOLDER: String = String::new();
+    ///         &PLACEHOLDER
+    ///     }
+    /// }
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
-    ///
     ///     let model = MyModel { a: 42 };
     ///     let old_value: Option<MyModel> = client.getset(&model).await?;
-    ///
-    ///     if let Some(value) = old_value {
-    ///         println!("Retrieved and replaced old value: {:?}", value);
-    ///     } else {
-    ///         println!("No value found for key: {}", model.key()?);
-    ///     }
-    ///
     ///     Ok(())
     /// }
     /// ```
     pub async fn getset<M, V>(&self, model: &M) -> Result<Option<V>>
     where
         M: RedisModel,
-        V: FromRedisValue,
+        V: RedisRead,
     {
         let mut connection = self.connection().await?;
         Ok(connection.getset(model.key()?, model.value()?).await?)
@@ -460,50 +447,48 @@ impl Client {
 
 // Set
 impl Client {
-    /// Asynchronously sets a value in Redis using the key and value from the provided model.
-    ///
-    /// This method stores the key-value pair in Redis, where the key is derived from the provided model and the
-    /// value is also obtained from the model. If the operation is successful, it returns a confirmation message.
-    /// The type `M` must implement the `RedisModel` trait.
-    ///
-    /// # Arguments
-    ///
-    /// * `model` - A reference to a model that contains the key and value to be stored in Redis.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing a `String` confirmation message indicating the success of the operation.
-    ///
     /// # Examples
     ///
     /// ```rust,no_run
+    /// use grapple_db::redis;
     /// use grapple_db::redis::Client;
-    /// # use grapple_db::redis;
-    /// # use grapple_db::redis::macros::FromRedisValue;
-    /// # use grapple_db::redis::RedisModel;
-    /// # use serde::{Serialize, Deserialize};
+    /// use grapple_db::redis::RedisModel;
+    /// use grapple_db::redis::macros::FromRedisValue;
+    /// use serde::{Serialize, Deserialize};
     ///
-    /// // Assuming you have a model defined with trait `RedisModel` implemented
-    /// # #[derive(Serialize, Deserialize, FromRedisValue)]
-    /// # struct MyModel {
-    /// #     a: u64,
-    /// # }
-    /// #
-    /// # impl RedisModel for MyModel {
-    /// #     type Key = String;
-    /// #
-    /// #     fn key(&self) -> Result<Self::Key, redis::Error> {
-    /// #         Ok(self.a.to_string())
-    /// #     }
-    /// # }
+    /// #[derive(Serialize, Deserialize, FromRedisValue)]
+    /// struct MyModel {
+    ///     a: u64,
+    /// }
+    ///
+    /// impl RedisModel for MyModel {
+    ///     type Key = String;
+    ///     type Value = String;
+    ///
+    ///     fn key(&self) -> grapple_db::redis::Result<Self::Key> {
+    ///         Ok(self.a.to_string())
+    ///     }
+    ///
+    ///     fn key_ref(&self) -> &Self::Key {
+    ///         static PLACEHOLDER: String = String::new();
+    ///         &PLACEHOLDER
+    ///     }
+    ///
+    ///     fn value(&self) -> grapple_db::redis::Result<impl deadpool_redis::redis::ToRedisArgs + Send + Sync> {
+    ///         Ok(serde_json::to_string(&self)?)
+    ///     }
+    ///
+    ///     fn value_ref(&self) -> &Self::Value {
+    ///         static PLACEHOLDER: String = String::new();
+    ///         &PLACEHOLDER
+    ///     }
+    /// }
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
-    ///
     ///     let model = MyModel { a: 42 };
     ///     let result: String = client.set(&model).await?;
-    ///
     ///     Ok(())
     /// }
     /// ```
@@ -515,166 +500,176 @@ impl Client {
         Ok(connection.set(model.key()?, model.value()?).await?)
     }
 
-    /// Asynchronously sets multiple values in Redis using the keys and values from the provided models.
-    ///
-    /// This method takes a collection of models that implement the `RedisModel` trait and stores their key-value
-    /// pairs in Redis. If the operation is successful, it returns a confirmation message. The type `M` must
-    /// implement the `RedisModel` trait.
-    ///
-    /// # Arguments
-    ///
-    /// * `models` - A collection of models to be stored in Redis.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing a `String` confirmation message indicating the success of the operation.
-    ///
     /// # Examples
     ///
     /// ```rust,no_run
+    /// use grapple_db::redis;
     /// use grapple_db::redis::Client;
-    /// # use grapple_db::redis;
-    /// # use grapple_db::redis::macros::FromRedisValue;
-    /// # use grapple_db::redis::RedisModel;
-    /// # use grapple_db::redis::RedisModelCollector;
-    /// # use serde::{Serialize, Deserialize};
+    /// use grapple_db::redis::RedisModel;
+    /// use grapple_db::redis::macros::FromRedisValue;
+    /// use serde::{Serialize, Deserialize};
     ///
-    /// // Assuming you have a model defined with trait `RedisModel` implemented
-    /// # #[derive(Serialize, Deserialize, FromRedisValue)]
-    /// # struct MyModel {
-    /// #     a: u64,
-    /// # }
-    /// #
-    /// # impl RedisModel for MyModel {
-    /// #     type Key = String;
-    /// #
-    /// #     fn key(&self) -> Result<Self::Key, redis::Error> {
-    /// #         Ok(self.a.to_string())
-    /// #     }
-    /// # }
+    /// #[derive(Serialize, Deserialize, FromRedisValue)]
+    /// struct MyModel {
+    ///     a: u64,
+    /// }
+    ///
+    /// impl RedisModel for MyModel {
+    ///     type Key = String;
+    ///     type Value = String;
+    ///
+    ///     fn key(&self) -> grapple_db::redis::Result<Self::Key> {
+    ///         Ok(self.a.to_string())
+    ///     }
+    ///
+    ///     fn key_ref(&self) -> &Self::Key {
+    ///         static PLACEHOLDER: String = String::new();
+    ///         &PLACEHOLDER
+    ///     }
+    ///
+    ///     fn value(&self) -> grapple_db::redis::Result<impl deadpool_redis::redis::ToRedisArgs + Send + Sync> {
+    ///         Ok(serde_json::to_string(&self)?)
+    ///     }
+    ///
+    ///     fn value_ref(&self) -> &Self::Value {
+    ///         static PLACEHOLDER: String = String::new();
+    ///         &PLACEHOLDER
+    ///     }
+    /// }
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
+    ///     let model1 = MyModel { a: 1 };
+    ///     let model2 = MyModel { a: 2 };
     ///
-    ///     let models = vec![&MyModel { a: 1 }, &MyModel { a: 2 }];
-    ///     let result: String = client.mset(&models).await?;
-    ///
+    ///     // Используем кортежи для mset
+    ///     let tuple1 = (model1.key().unwrap(), serde_json::to_string(&model1).unwrap());
+    ///     let tuple2 = (model2.key().unwrap(), serde_json::to_string(&model2).unwrap());
+    ///     let result: String = client.mset([&tuple1, &tuple2]).await?;
     ///     Ok(())
     /// }
     /// ```
-    pub async fn mset<M>(&self, models: impl RedisModelCollector<M>) -> Result<String>
+    pub async fn mset<M, P>(&self, pairs: P) -> Result<String>
     where
         M: RedisModel,
+        P: AsRedisPairs<M> + Send + Sync,
     {
         let mut connection = self.connection().await?;
-        Ok(connection.mset(&models.collect()).await?)
+
+        // Получаем пары ссылок
+        let pairs = pairs.as_pairs();
+
+        // Redis::mset принимает &[(&K, &V)]
+        Ok(connection.mset(&pairs).await?)
     }
 
-    /// Asynchronously sets multiple values in Redis using the keys and values from the provided models, only if the keys do not already exist.
-    ///
-    /// This method takes a collection of models that implement the `RedisModel` trait and stores their key-value
-    /// pairs in Redis only if the keys are not already present. If the operation is successful and no keys were
-    /// overwritten, it returns `true`. If any of the keys already exist, it returns `false`. The type `M` must
-    /// implement the `RedisModel` trait.
-    ///
-    /// # Arguments
-    ///
-    /// * `models` - A collection of models to be stored in Redis.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing a `bool`, where `true` indicates that the values were set successfully without
-    /// overwriting existing keys, and `false` indicates that at least one key already existed.
-    ///
     /// # Examples
     ///
     /// ```rust,no_run
+    /// use grapple_db::redis;
     /// use grapple_db::redis::Client;
-    /// # use grapple_db::redis;
-    /// # use grapple_db::redis::macros::FromRedisValue;
-    /// # use grapple_db::redis::RedisModel;
-    /// # use grapple_db::redis::RedisModelCollector;
-    /// # use serde::{Serialize, Deserialize};
+    /// use grapple_db::redis::RedisModel;
+    /// use grapple_db::redis::macros::FromRedisValue;
+    /// use serde::{Serialize, Deserialize};
     ///
-    /// // Assuming you have a model defined with trait `RedisModel` implemented
-    /// # #[derive(Serialize, Deserialize, FromRedisValue)]
-    /// # struct MyModel {
-    /// #     a: u64,
-    /// # }
-    /// #
-    /// # impl RedisModel for MyModel {
-    /// #     type Key = String;
-    /// #
-    /// #     fn key(&self) -> Result<Self::Key, redis::Error> {
-    /// #         Ok(self.a.to_string())
-    /// #     }
-    /// # }
+    /// #[derive(Serialize, Deserialize, FromRedisValue)]
+    /// struct MyModel {
+    ///     a: u64,
+    /// }
+    ///
+    /// impl RedisModel for MyModel {
+    ///     type Key = String;
+    ///     type Value = String;
+    ///
+    ///     fn key(&self) -> grapple_db::redis::Result<Self::Key> {
+    ///         Ok(self.a.to_string())
+    ///     }
+    ///
+    ///     fn key_ref(&self) -> &Self::Key {
+    ///         static PLACEHOLDER: String = String::new();
+    ///         &PLACEHOLDER
+    ///     }
+    ///
+    ///     fn value(&self) -> grapple_db::redis::Result<impl deadpool_redis::redis::ToRedisArgs + Send + Sync> {
+    ///         Ok(serde_json::to_string(&self)?)
+    ///     }
+    ///
+    ///     fn value_ref(&self) -> &Self::Value {
+    ///         static PLACEHOLDER: String = String::new();
+    ///         &PLACEHOLDER
+    ///     }
+    /// }
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
+    ///     let model1 = MyModel { a: 1 };
+    ///     let model2 = MyModel { a: 2 };
     ///
-    ///     let models = vec![&MyModel { a: 1 }, &MyModel { a: 2 }];
-    ///     let result: bool = client.mset_nx(&models).await?;
-    ///
+    ///     // Используем кортежи для mset_nx
+    ///     let tuple1 = (model1.key().unwrap(), serde_json::to_string(&model1).unwrap());
+    ///     let tuple2 = (model2.key().unwrap(), serde_json::to_string(&model2).unwrap());
+    ///     let result: bool = client.mset_nx([&tuple1, &tuple2]).await?;
     ///     Ok(())
     /// }
     /// ```
-    pub async fn mset_nx<M>(&self, models: impl RedisModelCollector<M>) -> Result<bool>
+    pub async fn mset_nx<M, P>(&self, pairs: P) -> Result<bool>
     where
         M: RedisModel,
+        P: AsRedisPairs<M> + Send + Sync,
     {
         let mut connection = self.connection().await?;
-        Ok(connection.mset_nx(&models.collect()).await?)
+
+        // Получаем пары ссылок без копирования данных
+        let pairs = pairs.as_pairs();
+
+        // Redis::mset принимает &[(&K, &V)]
+        Ok(connection.mset_nx(&pairs).await?)
     }
 
-    /// Asynchronously sets a value in Redis using the key and value from the provided model, only if the key does not already exist.
-    ///
-    /// This method stores the key-value pair in Redis, where the key is derived from the provided model and the
-    /// value is also obtained from the model. If the key already exists, it does not overwrite the existing value
-    /// and returns `false`. If the operation is successful and the key was set, it returns `true`. The type `M`
-    /// must implement the `RedisModel` trait.
-    ///
-    /// # Arguments
-    ///
-    /// * `model` - A reference to a model that contains the key and value to be stored in Redis.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing a `bool`, where `true` indicates that the value was set successfully, and `false`
-    /// indicates that the key already existed.
-    ///
     /// # Examples
     ///
     /// ```rust,no_run
+    /// use grapple_db::redis;
     /// use grapple_db::redis::Client;
-    /// # use grapple_db::redis;
-    /// # use grapple_db::redis::macros::FromRedisValue;
-    /// # use grapple_db::redis::RedisModel;
-    /// # use serde::{Serialize, Deserialize};
+    /// use grapple_db::redis::RedisModel;
+    /// use grapple_db::redis::macros::FromRedisValue;
+    /// use serde::{Serialize, Deserialize};
     ///
-    /// // Assuming you have a model defined with trait `RedisModel` implemented
-    /// # #[derive(Serialize, Deserialize, FromRedisValue)]
-    /// # struct MyModel {
-    /// #     a: u64,
-    /// # }
-    /// #
-    /// # impl RedisModel for MyModel {
-    /// #     type Key = String;
-    /// #
-    /// #     fn key(&self) -> Result<Self::Key, redis::Error> {
-    /// #         Ok(self.a.to_string())
-    /// #     }
-    /// # }
+    /// #[derive(Serialize, Deserialize, FromRedisValue)]
+    /// struct MyModel {
+    ///     a: u64,
+    /// }
+    ///
+    /// impl RedisModel for MyModel {
+    ///     type Key = String;
+    ///     type Value = String;
+    ///
+    ///     fn key(&self) -> grapple_db::redis::Result<Self::Key> {
+    ///         Ok(self.a.to_string())
+    ///     }
+    ///
+    ///     fn key_ref(&self) -> &Self::Key {
+    ///         static PLACEHOLDER: String = String::new();
+    ///         &PLACEHOLDER
+    ///     }
+    ///
+    ///     fn value(&self) -> grapple_db::redis::Result<impl deadpool_redis::redis::ToRedisArgs + Send + Sync> {
+    ///         Ok(serde_json::to_string(&self)?)
+    ///     }
+    ///
+    ///     fn value_ref(&self) -> &Self::Value {
+    ///         static PLACEHOLDER: String = String::new();
+    ///         &PLACEHOLDER
+    ///     }
+    /// }
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
-    ///
     ///     let model = MyModel { a: 42 };
     ///     let result: bool = client.set_nx(&model).await?;
-    ///
     ///     Ok(())
     /// }
     /// ```
@@ -686,52 +681,48 @@ impl Client {
         Ok(connection.set_nx(model.key()?, model.value()?).await?)
     }
 
-    /// Asynchronously sets a value in Redis using the key and value from the provided model, with an expiration time.
-    ///
-    /// This method stores the key-value pair in Redis, where the key is derived from the provided model and the
-    /// value is also obtained from the model. The key will expire after the specified number of seconds. If the
-    /// operation is successful, it returns a confirmation message. The type `M` must implement the `RedisModel`
-    /// trait.
-    ///
-    /// # Arguments
-    ///
-    /// * `model` - A reference to a model that contains the key and value to be stored in Redis.
-    /// * `secs` - The number of seconds after which the key should expire.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing a `String` confirmation message indicating the success of the operation.
-    ///
     /// # Examples
     ///
     /// ```rust,no_run
+    /// use grapple_db::redis;
     /// use grapple_db::redis::Client;
-    /// # use grapple_db::redis;
-    /// # use grapple_db::redis::macros::FromRedisValue;
-    /// # use grapple_db::redis::RedisModel;
-    /// # use serde::{Serialize, Deserialize};
+    /// use grapple_db::redis::RedisModel;
+    /// use grapple_db::redis::macros::FromRedisValue;
+    /// use serde::{Serialize, Deserialize};
     ///
-    /// // Assuming you have a model defined with trait `RedisModel` implemented
-    /// # #[derive(Serialize, Deserialize, FromRedisValue)]
-    /// # struct MyModel {
-    /// #     a: u64,
-    /// # }
-    /// #
-    /// # impl RedisModel for MyModel {
-    /// #     type Key = String;
-    /// #
-    /// #     fn key(&self) -> Result<Self::Key, redis::Error> {
-    /// #         Ok(self.a.to_string())
-    /// #     }
-    /// # }
+    /// #[derive(Serialize, Deserialize, FromRedisValue)]
+    /// struct MyModel {
+    ///     a: u64,
+    /// }
+    ///
+    /// impl RedisModel for MyModel {
+    ///     type Key = String;
+    ///     type Value = String;
+    ///
+    ///     fn key(&self) -> grapple_db::redis::Result<Self::Key> {
+    ///         Ok(self.a.to_string())
+    ///     }
+    ///
+    ///     fn key_ref(&self) -> &Self::Key {
+    ///         static PLACEHOLDER: String = String::new();
+    ///         &PLACEHOLDER
+    ///     }
+    ///
+    ///     fn value(&self) -> grapple_db::redis::Result<impl deadpool_redis::redis::ToRedisArgs + Send + Sync> {
+    ///         Ok(serde_json::to_string(&self)?)
+    ///     }
+    ///
+    ///     fn value_ref(&self) -> &Self::Value {
+    ///         static PLACEHOLDER: String = String::new();
+    ///         &PLACEHOLDER
+    ///     }
+    /// }
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let client = Client::default().await?;
-    ///
     ///     let model = MyModel { a: 42 };
-    ///     let result: String = client.set_ex(&model, 60).await?; // Set with 60 seconds expiration
-    ///
+    ///     let result: String = client.set_ex(&model, 60).await?;
     ///     Ok(())
     /// }
     /// ```
@@ -992,6 +983,7 @@ mod tests {
     use crate::redis::macros::FromRedisValue;
     use crate::redis::RedisModel;
     use serde::{Deserialize, Serialize};
+    use uuid::Uuid;
 
     use super::*;
 
@@ -1006,9 +998,24 @@ mod tests {
 
     impl RedisModel for Tst {
         type Key = String;
+        type Value = String;
+
+        fn key_ref(&self) -> &Self::Key {
+            &self.key
+        }
 
         fn key(&self) -> redis::Result<Self::Key> {
             Ok(self.key.clone())
+        }
+
+        fn value(&self) -> redis::Result<impl deadpool_redis::redis::ToRedisArgs + Send + Sync> {
+            Ok(serde_json::to_string(&self)?)
+        }
+
+        fn value_ref(&self) -> &Self::Value {
+            // Для тестов нам не нужно реальное значение
+            static PLACEHOLDER: String = String::new();
+            &PLACEHOLDER
         }
     }
 
@@ -1016,7 +1023,6 @@ mod tests {
         pub fn inc(mut self, value: u64) -> Self {
             self.a += value;
             self.b += value;
-
             self
         }
 
@@ -1060,22 +1066,24 @@ mod tests {
     async fn test_redis_mget() -> Result<()> {
         let client = get_client().await;
 
-        let key1 = "test_redis_mget1";
-        let key2 = "test_redis_mget2";
+        let key1 = "test_redis_mget1".to_string();
+        let key2 = "test_redis_mget2".to_string();
 
-        // Create model
-        let model1 = Tst::default(key1);
-        let model2 = Tst::default(key2);
-        client.mset(&[&model1, &model2]).await?;
+        // Create models
+        let model1 = Tst::default(&key1);
+        let model2 = Tst::default(&key2);
 
-        // Test
-        assert_eq!(
-            vec![Some(model1.clone()), Some(model2.clone())],
-            client.mget(&[key1, key2]).await?
-        );
+        // Используем кортежи для mset
+        let tuple1 = (key1.clone(), serde_json::to_string(&model1)?);
+        let tuple2 = (key2.clone(), serde_json::to_string(&model2)?);
+        client.mset([&tuple1, &tuple2]).await?;
+
+        // Test mget
+        let got: Vec<Option<Tst>> = client.mget(&[&key1, &key2]).await?;
+        assert_eq!(vec![Some(model1), Some(model2)], got);
 
         // Clear
-        client.mdel(&[key1, key2]).await?;
+        client.mdel([&key1, &key2]).await?;
 
         Ok(())
     }
@@ -1167,21 +1175,24 @@ mod tests {
     async fn test_redis_mset() -> Result<()> {
         let client = get_client().await;
 
-        let key1 = "test_redis_mset1";
-        let key2 = "test_redis_mset2";
+        let key1 = "test_redis_mset1".to_string();
+        let key2 = "test_redis_mset2".to_string();
 
-        // Create model
-        let model1 = Tst::default(key1);
-        let model2 = Tst::default(key2);
+        // Create models
+        let model1 = Tst::default(&key1);
+        let model2 = Tst::default(&key2);
 
-        // Test
-        assert_eq!("OK", client.mset(&[&model1, &model2]).await?);
+        // Используем кортежи для mset
+        let tuple1 = (key1.clone(), serde_json::to_string(&model1)?);
+        let tuple2 = (key2.clone(), serde_json::to_string(&model2)?);
 
-        assert_eq!(Some(model1), client.get(key1).await?);
-        assert_eq!(Some(model2), client.get(key2).await?);
+        assert_eq!("OK", client.mset([&tuple1, &tuple2]).await?);
+
+        assert_eq!(Some(model1), client.get(&key1).await?);
+        assert_eq!(Some(model2), client.get(&key2).await?);
 
         // Clear
-        client.mdel(&[key1, key2]).await?;
+        client.mdel([&key1, &key2]).await?;
 
         Ok(())
     }
@@ -1212,23 +1223,25 @@ mod tests {
     async fn test_redis_set_nx() -> Result<()> {
         let client = get_client().await;
 
-        let key = "test_redis_set_nx1";
+        let key = "test_redis_set_nx1".to_string();
 
-        // Create model
-        let model1 = Tst::default(key);
-        let model2 = Tst::default(key).inc(5);
+        // Create models
+        let model1 = Tst::default(&key);
+        let model2 = Tst::default(&key).inc(5);
+
+        // Используем кортежи для set_nx
+        let _tuple1 = (key.clone(), serde_json::to_string(&model1)?);
+        let _tuple2 = (key.clone(), serde_json::to_string(&model2)?);
 
         // Test
         assert!(client.set_nx(&model1).await?);
-
-        assert_eq!(Some(model1.clone()), client.get(key).await?);
+        assert_eq!(Some(model1.clone()), client.get(&key).await?);
 
         assert!(!client.set_nx(&model2).await?);
-
-        assert_eq!(Some(model1), client.get(key).await?);
+        assert_eq!(Some(model1), client.get(&key).await?);
 
         // Clear
-        client.del(key).await?;
+        client.del(&key).await?;
 
         Ok(())
     }
@@ -1237,32 +1250,36 @@ mod tests {
     async fn test_redis_mset_nx() -> Result<()> {
         let client = get_client().await;
 
-        let key1 = "test_redis_mset_nx1";
-        let key2 = "test_redis_mset_nx2";
+        let key1 = format!("test_redis_mset_nx1_{}", Uuid::new_v4());
+        let key2 = format!("test_redis_mset_nx2_{}", Uuid::new_v4());
 
-        // Create model
+        // Create models
+        let model1_before = Tst::default(&key1);
+        let model2_before = Tst::default(&key2);
+        let model1_after = Tst::default(&key1).inc(3);
+        let model2_after = Tst::default(&key2).inc(3);
 
-        let model1_before = Tst::default(key1);
-        let model2_before = Tst::default(key2);
-
-        let model1_after = Tst::default(key1).inc(3);
-        let model2_after = Tst::default(key2).inc(3);
+        // Используем кортежи для mset_nx
+        let tuple1_before = (key1.clone(), serde_json::to_string(&model1_before)?);
+        let tuple2_before = (key2.clone(), serde_json::to_string(&model2_before)?);
+        let tuple1_after = (key1.clone(), serde_json::to_string(&model1_after)?);
+        let tuple2_after = (key2.clone(), serde_json::to_string(&model2_after)?);
 
         // Test
-        assert!(client.mset_nx(&[&model1_before, &model2_before]).await?);
+        assert!(client.mset_nx([&tuple1_before, &tuple2_before]).await?);
         assert_eq!(
             vec![Some(model1_before.clone()), Some(model2_before.clone())],
-            client.mget(&[key1, key2]).await?
+            client.mget(&[&key1, &key2]).await?
         );
 
-        assert!(!client.mset_nx(&[&model1_after, &model2_after]).await?);
+        assert!(!client.mset_nx([&tuple1_after, &tuple2_after]).await?);
         assert_eq!(
-            vec![Some(model1_before.clone()), Some(model2_before.clone())],
-            client.mget(&[key1, key2]).await?
+            vec![Some(model1_before), Some(model2_before)],
+            client.mget(&[&key1, &key2]).await?
         );
 
         // Clear
-        client.mdel(&[key1, key2]).await?;
+        client.mdel([&key1, &key2]).await?;
 
         Ok(())
     }
@@ -1275,20 +1292,18 @@ mod tests {
     async fn test_redis_del() -> Result<()> {
         let client = get_client().await;
 
-        let key = "test_redis_del";
+        let key = "test_redis_del".to_string();
 
         // Create model
-        let fx_model = Tst::default(key);
-        client.set(&fx_model).await?;
+        let fx_model = Tst::default(&key);
+        let tuple = (key.clone(), serde_json::to_string(&fx_model)?);
+        client.mset([&tuple]).await?;
 
         // Test
-        assert_eq!(Some(fx_model), client.get(key).await?);
-
-        assert!(client.del(key).await?);
-
-        assert_eq!(None::<Tst>, client.get(key).await?);
-
-        assert!(!client.del(key).await?);
+        assert_eq!(Some(fx_model), client.get(&key).await?);
+        assert!(client.del(&key).await?);
+        assert_eq!(None::<Tst>, client.get(&key).await?);
+        assert!(!client.del(&key).await?);
 
         Ok(())
     }
@@ -1297,27 +1312,25 @@ mod tests {
     async fn test_redis_mdel() -> Result<()> {
         let client = get_client().await;
 
-        let key1 = "test_redis_mdel1";
-        let key2 = "test_redis_mdel2";
+        let key1 = "test_redis_mdel1".to_string();
+        let key2 = "test_redis_mdel2".to_string();
 
-        // Create model
-        let model1 = Tst::default(key1);
-        let model2 = Tst::default(key2);
+        // Create models
+        let model1 = Tst::default(&key1);
+        let model2 = Tst::default(&key2);
 
-        client.mset(&[&model1, &model2]).await?;
+        let tuple1 = (key1.clone(), serde_json::to_string(&model1)?);
+        let tuple2 = (key2.clone(), serde_json::to_string(&model2)?);
+        client.mset([&tuple1, &tuple2]).await?;
 
-        assert_eq!(Some(model1), client.get(key1).await?);
-        assert_eq!(Some(model2), client.get(key2).await?);
+        assert_eq!(Some(model1), client.get(&key1).await?);
+        assert_eq!(Some(model2), client.get(&key2).await?);
 
         // Test
-        assert_eq!(2, client.mdel(&[key1, key2]).await?);
-
-        println!("{:?}", client.get::<String, _>(key1).await?);
-
-        assert_eq!(None::<Tst>, client.get(key1).await?);
-        assert_eq!(None::<Tst>, client.get(key2).await?);
-
-        assert_eq!(0, client.mdel(&[key1, key2]).await?);
+        assert_eq!(2, client.mdel([&key1, &key2]).await?);
+        assert_eq!(None::<Tst>, client.get(&key1).await?);
+        assert_eq!(None::<Tst>, client.get(&key2).await?);
+        assert_eq!(0, client.mdel([&key1, &key2]).await?);
 
         Ok(())
     }
@@ -1330,18 +1343,19 @@ mod tests {
     async fn test_redis_exists() -> Result<()> {
         let client = get_client().await;
 
-        let key = "test_redis_exists";
+        let key = "test_redis_exists".to_string();
 
-        assert!(!client.exists(key).await?);
+        assert!(!client.exists(&key).await?);
 
         // Create model
-        let fx_model = Tst::default(key);
-        client.set(&fx_model).await?;
+        let fx_model = Tst::default(&key);
+        let tuple = (key.clone(), serde_json::to_string(&fx_model)?);
+        client.mset([&tuple]).await?;
 
-        assert!(client.exists(key).await?);
+        assert!(client.exists(&key).await?);
 
         // Clear
-        client.del(key).await?;
+        client.del(&key).await?;
 
         Ok(())
     }
@@ -1349,9 +1363,7 @@ mod tests {
     #[tokio::test]
     async fn test_redis_ping() -> Result<()> {
         let client = get_client().await;
-
         assert_eq!("PONG", client.ping().await?);
-
         Ok(())
     }
 
@@ -1359,24 +1371,22 @@ mod tests {
     async fn test_redis_rename() -> Result<()> {
         let client = get_client().await;
 
-        let key = "test_redis_rename";
-        let new_key = "test_redis_rename_new";
+        let key = "test_redis_rename".to_string();
+        let new_key = "test_redis_rename_new".to_string();
 
         // Create model
-        let fx_key_model = Tst::default(key);
-        let fx_key_new_model = Tst::default(key);
+        let fx_key_model = Tst::default(&key);
+        let tuple = (key.clone(), serde_json::to_string(&fx_key_model)?);
+        client.mset([&tuple]).await?;
 
-        client.set(&fx_key_model).await?;
-        client.set(&fx_key_new_model).await?;
+        assert_eq!("OK", client.rename(&key, &new_key).await?);
 
-        assert_eq!("OK", client.rename(key, new_key).await?);
-
-        let res: Option<Tst> = client.get(key).await?;
+        let res: Option<Tst> = client.get(&key).await?;
         assert_eq!(None, res);
-        assert_eq!(Some(fx_key_new_model), client.get(new_key).await?);
+        assert_eq!(Some(fx_key_model), client.get(&new_key).await?);
 
         // Clear
-        client.del(key).await?;
+        client.del(&new_key).await?;
 
         Ok(())
     }
@@ -1385,31 +1395,29 @@ mod tests {
     async fn test_redis_rename_nx() -> Result<()> {
         let client = get_client().await;
 
-        let key = "test_redis_rename_nx";
-        let new_key = "test_redis_rename_nx_new";
+        let key = "test_redis_rename_nx".to_string();
+        let new_key = "test_redis_rename_nx_new".to_string();
 
         // Create model
-        let fx_key_model = Tst::default(key);
-        client.set(&fx_key_model).await?;
+        let fx_key_model = Tst::default(&key);
+        let tuple = (key.clone(), serde_json::to_string(&fx_key_model)?);
+        client.mset([&tuple]).await?;
 
         // Test
-        assert!(client.rename_nx(key, new_key).await?);
+        assert!(client.rename_nx(&key, &new_key).await?);
 
-        let res: Option<Tst> = client.get(key).await?;
+        let res: Option<Tst> = client.get(&key).await?;
         assert_eq!(None, res);
-        assert_eq!(Some(fx_key_model.clone()), client.get(new_key).await?);
+        assert_eq!(Some(fx_key_model.clone()), client.get(&new_key).await?);
 
-        let fx_key_new_model = Tst::default(key);
-        client.set(&fx_key_new_model).await?;
+        let fx_key_new_model = Tst::default(&key);
+        let tuple2 = (key.clone(), serde_json::to_string(&fx_key_new_model)?);
+        client.mset([&tuple2]).await?;
 
-        assert!(!client.rename_nx(new_key, key).await?);
-
-        let res: Option<Tst> = client.get(key).await?;
-        assert_eq!(Some(fx_key_model), res);
-        assert_eq!(Some(fx_key_new_model), client.get(new_key).await?);
+        assert!(!client.rename_nx(&new_key, &key).await?);
 
         // Clear
-        client.mdel(&[key, new_key]).await?;
+        client.mdel([&key, &new_key]).await?;
 
         Ok(())
     }

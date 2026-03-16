@@ -1,6 +1,6 @@
 [package]
 name = "grapple_db"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2021"
 license = "MIT"
 description = "Library with clients for different databases with lightweight interface"
@@ -16,7 +16,7 @@ unsafe_code = "forbid"
 all-features = true
 
 [features]
-default = ["redis"]
+default = ["redis", "scylla"]
 scylla = ["dep:scylla", "dep:charybdis", "dep:futures"]
 redis = ["dep:deadpool-redis", "dep:grapple_redis_macros", "dep:serde_json", "dep:futures"]
 
@@ -50,5 +50,6 @@ derive_more = {version = "1", features = ["from"] }
 
 [dev-dependencies]
 criterion = "0.6.0"
+uuid = { version = "1.22.0", features = ["v4", "v7", "fast-rng", "serde"] }
 chrono = "0.4.41"
 anyhow = "1"

@@ -1,5 +1,41 @@
 # Changelog for grapple_db
 
+## [0.5.0] - 16 March 2026
+
+### ⚠️ Breaking Changes
+
+- **RedisModel trait**: Added associated type `Value` and required methods `key_ref()` and `value_ref()` for zero-copy operations
+- **RedisModelCollector removed**: Replaced with simpler `AsRedisPairs` trait
+- **Redis client methods**: Now use `RedisRead` trait instead of `FromRedisValue` for read operations
+- **mset/mset_nx**: Now accept arrays of references `[&tuple, &tuple]` instead of slices
+
+### Added
+
+- **RedisRead trait**: New trait for types that can be read from Redis (automatically implemented for types with `FromRedisValue + DeserializeOwned`)
+- **AsRedisPairs trait**: Simplified trait for converting collections to key-value pairs
+- **RedisPairRef struct**: Wrapper for explicit reference pairs when needed
+- **UUID support**: Added to dev-dependencies for unique test keys
+- **Binary data examples**: Show how to work with `[u8; N]` and references
+
+### Changed
+
+- **Single implementation for tuples**: One generic `(K, V)` implementation works for all types where `&V: ToRedisArgs`
+- **All get methods**: Now require `V: RedisRead` instead of `V: FromRedisValue`
+- **Examples**: Updated to show tuple-based approach with manual serialization
+- **Tests**: Now use unique keys with UUID to prevent interference
+- **Module visibility**: `collector` module is now public
+
+### Fixed
+
+- **Doctests**: All examples now compile and run correctly
+- **Type safety**: Better separation between write-only (`RedisModel`) and read/write (`RedisRead`) types
+- **Zero-copy**: Operations now work directly with references without unnecessary allocations
+
+### Removed
+
+- **RedisModelCollector trait**: Replaced with simpler `AsRedisPairs`
+- **Unused imports**: Cleaned up deadpool-redis imports
+
 ## [0.4.1] - 11 March 2026
 
 This version introduces several improvements:

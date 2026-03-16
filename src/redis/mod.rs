@@ -2,24 +2,9 @@
 //!
 //! This module provides a comprehensive implementation of a Redis client
 //! utilizing the `deadpool-redis` library for efficient data management and interaction.
-//! It includes various components necessary for establishing connections,
-//! performing operations on Redis models, handling errors, and managing data retrieval.
-//!
-//! # Modules
-//!
-//! - `client`: Contains the implementation of the Redis client for interacting
-//!   with the Redis database.
-//! - `collector`: Provides the `RedisModelCollector` for collecting and managing
-//!   Redis models for batch operations.
-//! - `error`: Defines custom error types and result types for handling errors
-//!   throughout the client.
-//!
-//! This module facilitates modular development and simplifies the maintenance
-//! of the Redis client, allowing each component to be developed and tested
-//! in isolation.
 
 mod client;
-mod collector;
+pub mod collector;
 mod error;
 
 pub mod pool {
@@ -31,76 +16,96 @@ pub mod macros {
 }
 
 pub use client::Client;
-pub use collector::RedisModelCollector;
 pub use deadpool_redis::redis::FromRedisValue;
 pub use deadpool_redis::redis::*;
 pub use error::{Error, Result};
 
 use serde::{de::DeserializeOwned, Serialize};
+use std::fmt::Debug;
 
-/// A trait representing a Redis model
-///
-/// This trait extends the functionality of Redis models by requiring them to implement
-/// the `FromRedisValue`, `Serialize` and `Deserialize` traits. It provides a method to retrieve
-/// the key associated with the model and a default implementation for serializing the
-/// model into a JSON string.
-///
-/// # Methods
-///
-/// * `key` - Returns a `String` representing the key for the Redis model.
-/// * `value` - Serializes the model into a JSON string and returns it as a `Result`.
-///
-/// # Examples
-///
-/// ```rust,no_run
-/// use serde::{Deserialize, Serialize};
-/// use grapple_db::redis;
-/// use grapple_db::redis::ToRedisArgs;
-/// use grapple_db::redis::Result;
-/// use grapple_db::redis::RedisModel;
-/// use grapple_db::redis::macros::FromRedisValue;
-///
-/// #[derive(Debug, Deserialize, Serialize, FromRedisValue)]
-/// struct MyModel {
-///     id: String,
-///     data: String,
-/// }
-///
-/// impl RedisModel for MyModel {
-///     type Key = String;
-///
-///     fn key(&self) -> Result<Self::Key> {
-///         Ok(self.id.to_string())
-///     }
-/// }
-///
-/// fn example(model: &MyModel) -> Result<Vec<Vec<u8>>> {
-///     Ok(model.value()?.to_redis_args())
-/// }
-/// ```
-pub trait RedisModel: FromRedisValue + Serialize + DeserializeOwned {
+// Базовый трейт для моделей, которые можно сохранять
+pub trait RedisModel: Serialize {
     type Key: ToRedisArgs + Send + Sync;
+    type Value: ToRedisArgs + Send + Sync;
 
     fn key(&self) -> Result<Self::Key>;
-    #[inline]
+    fn key_ref(&self) -> &Self::Key;
     fn value(&self) -> Result<impl ToRedisArgs + Send + Sync> {
         Ok(serde_json::to_string(&self)?)
     }
+    fn value_ref(&self) -> &Self::Value;
 }
 
-impl<V> RedisModel for (String, V)
-where
-    V: Serialize + DeserializeOwned + FromRedisValue + Clone,
-{
-    type Key = String;
+// Трейт для типов, которые можно читать из Redis
+pub trait RedisRead: FromRedisValue + DeserializeOwned {}
 
-    #[inline]
+// Автоматическая реализация для всех, кто имеет FromRedisValue + DeserializeOwned
+impl<T> RedisRead for T where T: FromRedisValue + DeserializeOwned {}
+
+// ЕДИНСТВЕННАЯ ОБЩАЯ РЕАЛИЗАЦИЯ ДЛЯ КОРТЕЖЕЙ
+impl<K, V> RedisModel for (K, V)
+where
+    K: ToRedisArgs + Send + Sync + Clone + Serialize,
+    V: ToRedisArgs + Send + Sync + Serialize,
+    for<'a> &'a V: ToRedisArgs, // Позволяет работать с &[u8; N] как с &[u8]
+{
+    type Key = K;
+    type Value = V;
+
     fn key(&self) -> Result<Self::Key> {
         Ok(self.0.clone())
     }
 
-    #[inline]
+    fn key_ref(&self) -> &Self::Key {
+        &self.0
+    }
+
     fn value(&self) -> Result<impl ToRedisArgs + Send + Sync> {
-        Ok(serde_json::to_string(&self.1)?)
+        // Всегда возвращаем ссылку на значение
+        Ok(&self.1)
+    }
+
+    fn value_ref(&self) -> &Self::Value {
+        &self.1
+    }
+}
+
+/// Обертка для пары ссылок (key, value) - если нужны явные ссылки
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct RedisPairRef<'a, K, V> {
+    pub key: &'a K,
+    pub value: &'a V,
+}
+
+impl<'a, K, V> RedisPairRef<'a, K, V> {
+    pub fn new(key: &'a K, value: &'a V) -> Self {
+        Self { key, value }
+    }
+}
+
+// Реализация для RedisPairRef
+impl<'a, K, V> RedisModel for RedisPairRef<'a, K, V>
+where
+    K: ToRedisArgs + Send + Sync + Serialize + Clone,
+    V: ToRedisArgs + Send + Sync + Serialize,
+    for<'b> &'b V: ToRedisArgs,
+{
+    type Key = K;
+    type Value = V;
+
+    fn key(&self) -> Result<Self::Key> {
+        Ok(self.key.clone())
+    }
+
+    fn key_ref(&self) -> &Self::Key {
+        self.key
+    }
+
+    fn value(&self) -> Result<impl ToRedisArgs + Send + Sync> {
+        Ok(self.value)
+    }
+
+    fn value_ref(&self) -> &Self::Value {
+        self.value
     }
 }
